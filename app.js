@@ -92,8 +92,10 @@ store.on('error', function(error) {
 
 ////// Catch all 404, forward to error handler. 
 app.use(function(err, req, res, next) {
-    var err = new Error('File Not Found');
-    err.status = 404;
+    if (!err) {
+        var err = new Error('File Not Found');
+        err.status = 404;
+    }
     next(err);
 });
 
@@ -101,10 +103,12 @@ app.use(function(err, req, res, next) {
 app.use(function(err, req, res, next) {
     res.status(err.status || 500);
     res.json({
-        error: {
-            message: err.message
-        }
+        error: err.message,
+        type: err.type
     });
+    // res.redirect('/error=' + "error"); // To pass info in redirect must add relevent info in href.
+    // Can use React component to parse url for error information and then load different component.
+    // Could also create get request
     console.log(err);
 })
 
