@@ -12,6 +12,8 @@ OR $ tar xzf redis-4.0.9.tar.gz
 cd redis-stable
 OR cd redis-4.0.9 or redis-whatever version #
 
+You may have to do the following in different order. Make sure to do make distclean if errors at end
+
 sudo apt-get install make
 
 sudo apt-get install gcc
