@@ -2,6 +2,24 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/user');
 const Chat = require('../models/chat');
+const redis = require('redis');
+const redisapp = require('../redis');
+let redisclient = redisapp.redisclient;
+
+// Redis and bull functionality to queue all incoming requests
+// Redis
+
+let redisport = redisapp.redisport;
+let redishost = redisapp.redishost;
+
+redisclient.set('foo', 'bar', redis.print);
+redisclient.get('foo', function (error, result) {
+    if (error) {
+        console.log(error);
+        throw error;
+    }
+    console.log('GET result ->' + result);
+});
 
 // LOGIN
 

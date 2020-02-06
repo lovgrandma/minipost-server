@@ -14,6 +14,7 @@ const busboy = require('connect-busboy');
 const busboyBodyParser = require('busboy-body-parser');
 const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
+const redis = require('./redis');
 const app = express();
 
 // parse incoming requests as json and make it accessible from req body property.
@@ -35,7 +36,7 @@ const db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 
 // mongo store
-var store = new MongoDBStore(
+const store = new MongoDBStore(
     {
         uri: 'mongodb://localhost:27017/minireel',
         databaseName: 'minireel',
