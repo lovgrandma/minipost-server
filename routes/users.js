@@ -21,6 +21,15 @@ redisclient.get('foo', function (error, result) {
     console.log('GET result ->' + result);
 });
 
+//Basic redis queue. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
+router.use(function(req, res, next) {
+
+    // Can create a new queue with Bull. Determine if other jobs are running. If not, then next(), else wait.
+
+    console.log(req.originalUrl); // Log url user queried
+    next(); // sends to next
+})
+
 // LOGIN
 
 router.post('/login', (req, res, next) => {
