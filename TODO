@@ -1,0 +1,119 @@
+    Old code and TODO
+    
+    
+    
+    
+    Old Code
+    
+    /****** this code was the precursor to a functioning friends request/add functionality
+    
+    
+    //
+    // if chat is on pending list
+    
+    
+    // if chat is on confirmed list
+    
+    
+    
+//    if (friendsalready) {
+//        // friends
+//        if (chatexists) {
+//            // friends and chat exists. Send chat message to database
+//            
+//            // add chat to users active chats.
+//        } else {
+//            // friends but start new chatlog
+//            // when other user logs in it will get all 
+//            
+//            // add chat to users active chats.
+//        }
+//    } else {
+//        // not friends 
+//        if (chatexists) {
+//            // not friends but chatlog exists. 
+//            if (onconfirmedlist) {
+//                // send chat
+//                // add chat to users active chats.
+//            } else if (onpendinglist) {
+//                // accept request to chat
+//                // take off pending list and put into confirmed in chat
+//                // send chat
+//                // add chat to users active chats.
+//            } else {
+//                res.json({querystatus: 'you are not apart of this chat'});
+//            }
+//        } else {
+//            // not friends & no chatlog 
+//            var chatData = {
+//                host: req.body.username,
+//                users: [
+//                    {
+//                        confirmed: [
+//                            req.body.username
+//                    ]
+//                    },
+//                    {
+//                        pending: [
+//                            req.body.chatwith
+//                        ]
+//                    },
+//                ],
+//                log: [
+//                    {
+//                        host: req.body.username,
+//                        content: 'this is a chat',
+//                        timestamp: new Date().toLocaleString(),
+//                    },
+//                ]
+//            };
+//
+//            // use schema's 'create' method to insert document into Mongo
+//            Chat.create(chatData, function (error, chat) {
+//                if (error) {
+//                    console.log('error creating new chat');
+//                    return next(error);
+//                } else {
+//                    return res.json(chat);
+//                }
+//            });
+//            
+//            // add chat to users active chats.
+//            // put chat id into other users pending chats list.
+//            
+//        }
+//    }
+
+
+// old login function
+
+//router.post('/login', (req, res, next) => {
+//    console.log(req.body.email);
+//    if (req.body.email && req.body.password) {
+//        User.authenticate(req.body.email, req.body.password, function (error, user) {
+//            console.log(user);
+//            if (error || !user) {
+//                var err = new Error('Wrong email or password');
+//                err.status = 401;
+//                err.type = "login error";
+//                return next(err);
+//            } else {
+//                req.session.userId = user._id;
+//                req.session.username = user.username;
+//                let options = {
+//                    maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+//                    signed: true,
+//                }
+//                if (req.cookies.loggedIn === undefined) {
+//                    (res.cookie('loggedIn', user.username, [options]));
+//                }
+//                return res.json({querystatus: "loggedin"});
+//            }
+//        });
+//    } else {
+//        var err = new Error('Email and password are required');
+//        err.status = 401;
+//        err.type = "login error";
+//        return next(err);
+//    }
+//});

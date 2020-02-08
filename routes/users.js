@@ -4,7 +4,9 @@ const User = require('../models/user');
 const Chat = require('../models/chat');
 const redis = require('redis');
 const redisapp = require('../redis');
-let redisclient = redisapp.redisclient;
+const redisclient = redisapp.redisclient;
+
+const Queue = require('bull');
 
 // Redis and bull functionality to queue all incoming requests
 // Redis
@@ -21,18 +23,46 @@ redisclient.get('foo', function (error, result) {
     console.log('GET result ->' + result);
 });
 
-//Basic redis queue. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
+//Basic redis request. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
+
+let reqQueue = new Queue('request'); // Bull basic request queue.
+
+// All requests could be given basic urgency and be treated the same. Instructions for request would be determined by req.originalUrl . Header info would be put into data and then parsed when taken from binary redis database. Each request must be refactored as a stand alone function that can be called within a job call e.g.
+
+// 1. queue is created above. like let queue = new Queue('videoQueue');
+// 2. Create data in form of array. like let data = { reqUrl: req.originalUrl, otherstuff: stuff }
+// 3. Do queue.add(data, options)
+// 4. reqQueue.process(async job => {
+//      await RouteFunction(job.data);
+//    })
+
+
 router.use(function(req, res, next) {
+    // Can create a new queue with Bull. Determine if earlier jobs are running. If not, then next(), else wait.
 
-    // Can create a new queue with Bull. Determine if other jobs are running. If not, then next(), else wait.
+    console.log("-Redis, bull request req.originalUrl: " + req.originalUrl); // Log url user queried
+    let data = {
+        reqUrl: req.originalUrl
+    }
 
-    console.log(req.originalUrl); // Log url user queried
+    let options = {
+        attempts: 2
+    }
+
+    reqQueue.add(data, options);
     next(); // sends to next
 })
 
+// base query
+//reqQueue.process(async job => {
+//        await console.log(job.data);
+//})
+
+// Queries for main request functionality of minireel.
 // LOGIN
 
-router.post('/login', (req, res, next) => {
+// Login function
+let loginfunc = (req, res, next) => {
     console.log(req.body.email);
     if (req.body.email && req.body.password) {
         User.authenticate(req.body.email, req.body.password, function (error, user) {
@@ -61,7 +91,42 @@ router.post('/login', (req, res, next) => {
         err.type = "login error";
         return next(err);
     }
+};
+
+router.post('/login', (req, res, next) => {
+    return loginfunc(req, res, next);
 });
+
+//router.post('/login', (req, res, next) => {
+//    console.log(req.body.email);
+//    if (req.body.email && req.body.password) {
+//        User.authenticate(req.body.email, req.body.password, function (error, user) {
+//            console.log(user);
+//            if (error || !user) {
+//                var err = new Error('Wrong email or password');
+//                err.status = 401;
+//                err.type = "login error";
+//                return next(err);
+//            } else {
+//                req.session.userId = user._id;
+//                req.session.username = user.username;
+//                let options = {
+//                    maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+//                    signed: true,
+//                }
+//                if (req.cookies.loggedIn === undefined) {
+//                    (res.cookie('loggedIn', user.username, [options]));
+//                }
+//                return res.json({querystatus: "loggedin"});
+//            }
+//        });
+//    } else {
+//        var err = new Error('Email and password are required');
+//        err.status = 401;
+//        err.type = "login error";
+//        return next(err);
+//    }
+//});
 
 // REGISTER
 router.post('/register', (req, res, next) => {
@@ -205,7 +270,7 @@ router.post('/searchusers', (req, res, next) => {
     if (!req.body.searchusers) {
         res.json({querystatus: 'empty friend search query'});
     } else {
-        if(req.body.limit) {
+        if(req.body.limit) { // This determines if there is a body length limit, meaning a request to see more users. This only occurs if user has already made a base search which is done in the else statement.
             User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
                 if (err) throw err;
                 console.log("limitedsearch")
@@ -226,24 +291,21 @@ router.post('/searchusers', (req, res, next) => {
                 })
             });
         } else {
-        // the following makes a query to the database for users matching the user search input and only returns the username and id.
+        // the following makes a query to the database for users matching the user search input and only returns the username and id. This is the first query which limits the return search to 10 users.
             User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
                 if (err) throw err;
                 console.log("base search");
                 console.log(result.length)
                 searchresults.push(result.splice(0,10));
-                if (result.length > 10) {
-                    searchresults.push({ moreusers: true }); // determines if there are more users to load if another request is made
+                if (result.length > 10) { // If there are more users to load in the results
+                    searchresults.push({ moreusers: true }); // Return 'more users' truthiness: There are more users to be loaded if the user wants to make another request
                 } else {
                     searchresults.push({ moreusers: false });
                 }
 
-                // Need code to provide boolean if there is more users to GET. For 'load more users' functionality on general user search.
-
-                // gets pending friends list from logged in user and pushes it into array to determine if a searched user has asked to be friends.
+                // Follow query gets pending friends list from logged in user and pushes it into array to determine if a searched user has asked to be friends.
                 User.findOne({username: req.body.username }, {friends: 1}, function(err, result) {
                     if (err) throw err;
-                    // console.log(result.friends[1].pending)
                     searchresults.push(result.friends[1].pending)
                     console.log(searchresults);
                     res.json(searchresults);
@@ -965,116 +1027,14 @@ router.post('/beginchat', (req, res, next) => {
                 })
             })
         }
-                
-    
-    
-    // if chat is on pending list
-    
-    
-    // if chat is on confirmed list
-    
-    
-    
-//    if (friendsalready) {
-//        // friends
-//        if (chatexists) {
-//            // friends and chat exists. Send chat message to database
-//            
-//            // add chat to users active chats.
-//        } else {
-//            // friends but start new chatlog
-//            // when other user logs in it will get all 
-//            
-//            // add chat to users active chats.
-//        }
-//    } else {
-//        // not friends 
-//        if (chatexists) {
-//            // not friends but chatlog exists. 
-//            if (onconfirmedlist) {
-//                // send chat
-//                // add chat to users active chats.
-//            } else if (onpendinglist) {
-//                // accept request to chat
-//                // take off pending list and put into confirmed in chat
-//                // send chat
-//                // add chat to users active chats.
-//            } else {
-//                res.json({querystatus: 'you are not apart of this chat'});
-//            }
-//        } else {
-//            // not friends & no chatlog 
-//            var chatData = {
-//                host: req.body.username,
-//                users: [
-//                    {
-//                        confirmed: [
-//                            req.body.username
-//                    ]
-//                    },
-//                    {
-//                        pending: [
-//                            req.body.chatwith
-//                        ]
-//                    },
-//                ],
-//                log: [
-//                    {
-//                        host: req.body.username,
-//                        content: 'this is a chat',
-//                        timestamp: new Date().toLocaleString(),
-//                    },
-//                ]
-//            };
-//
-//            // use schema's 'create' method to insert document into Mongo
-//            Chat.create(chatData, function (error, chat) {
-//                if (error) {
-//                    console.log('error creating new chat');
-//                    return next(error);
-//                } else {
-//                    return res.json(chat);
-//                }
-//            });
-//            
-//            // add chat to users active chats.
-//            // put chat id into other users pending chats list.
-//            
-//        }
-//    }
-
 });
-
-// confirm 
-
-router.post('/confirmchat', (req, res, next) => {
-    // confirms participation in chat by checking if user is in confirmed list, else adding user to confirmed and removing from pending
-})
-
-// send chat to database
-router.post('/sendchat', (req, res, next) => {
-    
-    // put '/confirmchat' function here
-    
-    // sends message to database
-    
-})
-
 
 
 // take chat id and append it to users in chat in the database.
 
 // Socket.io. Build socket opening route to make chat "live" (Seperate this into another function);
 
-
-
-
-
 // GET a users profile
-
-// POST add friend
-
-// DELETE friend
 
 // GET a video
 
