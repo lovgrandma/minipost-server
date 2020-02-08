@@ -62,7 +62,7 @@ router.use(function(req, res, next) {
 // LOGIN
 
 // Login function
-let loginfunc = (req, res, next) => {
+const loginfunc = (req, res, next) => {
     console.log(req.body.email);
     if (req.body.email && req.body.password) {
         User.authenticate(req.body.email, req.body.password, function (error, user) {
