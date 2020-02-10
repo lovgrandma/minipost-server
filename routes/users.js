@@ -93,43 +93,7 @@ const loginfunc = (req, res, next) => {
     }
 };
 
-router.post('/login', (req, res, next) => {
-    return loginfunc(req, res, next);
-});
-
-//router.post('/login', (req, res, next) => {
-//    console.log(req.body.email);
-//    if (req.body.email && req.body.password) {
-//        User.authenticate(req.body.email, req.body.password, function (error, user) {
-//            console.log(user);
-//            if (error || !user) {
-//                var err = new Error('Wrong email or password');
-//                err.status = 401;
-//                err.type = "login error";
-//                return next(err);
-//            } else {
-//                req.session.userId = user._id;
-//                req.session.username = user.username;
-//                let options = {
-//                    maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
-//                    signed: true,
-//                }
-//                if (req.cookies.loggedIn === undefined) {
-//                    (res.cookie('loggedIn', user.username, [options]));
-//                }
-//                return res.json({querystatus: "loggedin"});
-//            }
-//        });
-//    } else {
-//        var err = new Error('Email and password are required');
-//        err.status = 401;
-//        err.type = "login error";
-//        return next(err);
-//    }
-//});
-
-// REGISTER
-router.post('/register', (req, res, next) => {
+const registerfunc = (req, res, next) => {
     if (req.body.username && req.body.regemail && req.body.regpassword && req.body.confirmPassword) {
         // confirm that user typed same password twice
         if (req.body.regpassword !== req.body.confirmPassword) {
@@ -173,8 +137,8 @@ router.post('/register', (req, res, next) => {
         };
         
         User.findOne({username: req.body.username }, function(err, result) { // Search for entered user to see if user already exists
-            console.log(result);
-            console.log(req.body.username.length);
+            console.log("Attempt register, use exists already?: " + result);
+            console.log("Length of username: " + req.body.username.length);
             if (req.body.username.length < 23 && req.body.username.length > 4) {
                 if (result == null) { // if null, user does not exist
                     User.findOne({email: req.body.regemail }, function(err, result) { // Search for entered email to see if email exists
@@ -230,6 +194,15 @@ router.post('/register', (req, res, next) => {
         err.type = 'register error';
         return next(err);
     }
+};
+
+router.post('/login', (req, res, next) => {
+    return loginfunc(req, res, next);
+});
+
+// REGISTER
+router.post('/register', (req, res, next) => {
+    return registerfunc(req, res, next);
 });
 
 // LOGOUT
