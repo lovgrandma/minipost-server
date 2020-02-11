@@ -682,6 +682,15 @@ const getconversationlogsf = (req, res, next) => {
     });
 }
 
+const getfriendsf = (req, res, next) => {
+    User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
+        if (err) throw err;
+        let userfriendslist = result.friends[0].confirmed;
+        //  console.log('getfriends' + userfriendslist);
+        res.json(userfriendslist);
+    });
+}
+
 // LOGIN USING CREDENTIALS
 router.post('/login', (req, res, next) => {
     return loginfunc(req, res, next);
@@ -707,35 +716,36 @@ router.post('/searchusers', (req, res, next) => {
     return searchusersf(req, res, next);
 });
 
+// REQUEST FRIENDSHIP
 router.post('/requestfriendship', (req, res, next) => {
     return requestfriendshipf(req, res, next);
 });
 
+// REVOKE FRIENDSHIP
 router.post('/revokefriendship', (req, res, next) => {
     return revokefriendshipf(req, res, next);
 });
 
+// GET PENDING REQUESTS
 router.post('/pendingrequests', (req, res, next) => {
     return pendingrequestsf(req, res, next);
 })
 
+// ACCEPT FRIEND REQUEST
 router.post('/acceptfriendrequest', (req, res, next) => {
     return acceptfriendrequestf(req, res, next);
 })
 
+// GET FRIENDS
 router.post('/getfriends', (req, res, next) => {
-    User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
-        if (err) throw err;
-        let userfriendslist = result.friends[0].confirmed;
-//        console.log('getfriends' + userfriendslist);
-        res.json(userfriendslist);
-    })
+    return getfriendsf(req, res, next);
 });
 
 // Gets chat logs
 
 // Reminder, pending doesnt mean not friends, it means the other user has not responded to the chat thus confirming it.
 // Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
+// Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
 
 router.post('/getconversationlogs', (req, res, next) => {
     return getconversationlogsf(req, res, next);
