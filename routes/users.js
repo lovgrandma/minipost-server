@@ -14,6 +14,7 @@ const Queue = require('bull');
 let redisport = redisapp.redisport;
 let redishost = redisapp.redishost;
 
+// Example redis request
 redisclient.set('foo', 'bar', redis.print);
 redisclient.get('foo', function (error, result) {
     if (error) {
@@ -49,13 +50,18 @@ router.use(function(req, res, next) {
         attempts: 2
     }
 
-    reqQueue.add(data, options);
+    reqQueue.add(data, options); // Add job with data and options to queue.
     next(); // sends to next
 })
 
-// base query
+// basic Consumer that begins doing the job using specific function.
 //reqQueue.process(async job => {
-//        await console.log(job.data);
+//        await dofunction(job.data);
+//})
+
+// basic Listener.
+//myFirstQueue.on('completed', (job, result) => {
+//  console.log(`Job completed with result ${result}`);
 //})
 
 // Queries for main request functionality of minireel.
@@ -691,73 +697,7 @@ const getfriendsf = (req, res, next) => {
     });
 }
 
-// LOGIN USING CREDENTIALS
-router.post('/login', (req, res, next) => {
-    return loginfunc(req, res, next);
-});
-
-// ATTEMPT REGISTER
-router.post('/register', (req, res, next) => {
-    return registerfunc(req, res, next);
-});
-
-// LOGOUT
-router.get('/logout', (req, res, next) => {
-    return logoutf(req, res, next);
-});
-
-// Base route (unused)
-router.get('/', (req, res, next) => {
-    return mainf(req, res, next);
-});
-
-// SEARCH / GET USERS THAT MATCH THIS QUERY.
-router.post('/searchusers', (req, res, next) => {
-    return searchusersf(req, res, next);
-});
-
-// REQUEST FRIENDSHIP
-router.post('/requestfriendship', (req, res, next) => {
-    return requestfriendshipf(req, res, next);
-});
-
-// REVOKE FRIENDSHIP
-router.post('/revokefriendship', (req, res, next) => {
-    return revokefriendshipf(req, res, next);
-});
-
-// GET PENDING REQUESTS
-router.post('/pendingrequests', (req, res, next) => {
-    return pendingrequestsf(req, res, next);
-})
-
-// ACCEPT FRIEND REQUEST
-router.post('/acceptfriendrequest', (req, res, next) => {
-    return acceptfriendrequestf(req, res, next);
-})
-
-// GET FRIENDS
-router.post('/getfriends', (req, res, next) => {
-    return getfriendsf(req, res, next);
-});
-
-// Gets chat logs
-
-// Reminder, pending doesnt mean not friends, it means the other user has not responded to the chat thus confirming it.
-// Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
-// Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
-
-router.post('/getconversationlogs', (req, res, next) => {
-    return getconversationlogsf(req, res, next);
-});
-
-// Sends chat message to a chat document.
-// If friends, chat doesnt exist, then create chat, make chat confirmed for both
-// If friends, chat exists, forward chat message to chat document
-// If not friends, chat doesnt exist, then create chat make chat pending for other user
-// If not friends, chat exists, forward chat message to chat document, if chat in pending array take chat off pending, put into confirmed.
-router.post('/beginchat', (req, res, next) => {
-    
+const beginchatf = (req, res, next) => {
     console.log(req.body.username, req.body.chatwith, req.body.message);
     let booleans = [];
     let chatdata;
@@ -856,208 +796,273 @@ router.post('/beginchat', (req, res, next) => {
             }).catch(error => {
                 console.log(error);
             }).then(async function() {
-                    booleans = await getlistedchattruthiness();
-                    if (booleans[0].friends) { // Friends true
-                        if (booleans[1].chatexists) { // Chat exists true
-                            console.log('friends and chat exists');
-                            let chatinfo = {
-                                    author: req.body.username,
-                                    content: chatmessage,
-                                    timestamp: new Date().toLocaleString(),
-                                }
+                booleans = await getlistedchattruthiness();
+                if (booleans[0].friends) { // Friends true
+                    if (booleans[1].chatexists) { // Chat exists true
+                        console.log('friends and chat exists');
+                        let chatinfo = {
+                                author: req.body.username,
+                                content: chatmessage,
+                                timestamp: new Date().toLocaleString(),
+                            }
 
-                            if (booleans[2].chatlisted === 'pending') {
-                                // take off pending list
-                                // put on confirmed list
-                                console.log('take off pending list');
-                                console.log(chatdata._id)
-                                User.findOneAndUpdate({username: req.body.username},
-                                        {$pull: { "chats.1.pending": chatdata._id}},
+                        if (booleans[2].chatlisted === 'pending') {
+                            // take off pending list
+                            // put on confirmed list
+                            console.log('take off pending list');
+                            console.log(chatdata._id)
+                            User.findOneAndUpdate({username: req.body.username},
+                                    {$pull: { "chats.1.pending": chatdata._id}},
+                                    {upsert: true,
+                                    new: true},
+                                    function(err, result) {
+                                        if (err) throw err;
+                                        // add to confirmed
+                                        User.findOneAndUpdate({username: req.body.username},
+                                        {$push: { "chats.0.confirmed": chatdata._id}},
                                         {upsert: true,
                                         new: true}, 
                                         function(err, result) {
                                             if (err) throw err;
-                                            // add to confirmed
-                                            User.findOneAndUpdate({username: req.body.username},
-                                            {$push: { "chats.0.confirmed": chatdata._id}},
+                                            // send chat
+                                            Chat.findOneAndUpdate({_id: chatdata._id},
+                                            {$push: { "log": chatinfo}},
                                             {upsert: true,
-                                            new: true}, 
+                                            new: true},
                                             function(err, result) {
                                                 if (err) throw err;
-                                                // send chat
-                                                Chat.findOneAndUpdate({_id: chatdata._id},
-                                                {$push: { "log": chatinfo}},
-                                                {upsert: true,
-                                                new: true},
-                                                function(err, result) {
-                                                    if (err) throw err;
-                                                    res.json(result);
-                                                });
+                                                res.json(result);
                                             });
                                         });
-                            } else if (booleans[2].chatlisted === 'confirmed') {
-                                // send chat
-                                Chat.findOneAndUpdate({_id: chatdata._id},
-                                {$push: { "log": chatinfo}},
+                                    });
+                        } else if (booleans[2].chatlisted === 'confirmed') {
+                            // send chat
+                            Chat.findOneAndUpdate({_id: chatdata._id},
+                            {$push: { "log": chatinfo}},
+                            {upsert: true,
+                            new: true},
+                            function(err, result) {
+                                if (err) throw err;
+                                res.json(result);
+                            });
+                        }
+
+                    } else { // Chat doesnt exist, start new chatlog with user as host.
+                        console.log('friends and chat doesnt exist');
+
+                        var chatinfo = {
+                        host: req.body.username,
+                        users: [
+                                req.body.username, req.body.chatwith
+                            ],
+                        log: [
+                                {
+                                    author: req.body.username,
+                                    // append chat
+                                    content: chatmessage,
+                                    timestamp: new Date().toLocaleString(),
+                                },
+                            ]
+                        };
+
+                        Chat.create(chatinfo, function (error, chat) { // use schema's 'create' method to insert chat document into Mongo
+                            if (error) {
+                                console.log('error creating new chat');
+                                return next(error);
+                            } else {
+                                // add chat to users confirmed list.
+                                User.findOneAndUpdate({username: req.body.username},
+                                {$addToSet: { "chats.0.confirmed": chat._id}},
                                 {upsert: true,
                                 new: true}, 
                                 function(err, result) {
                                     if (err) throw err;
-                                    res.json(result);
+                                    // add chat to chatwith pending list.
+                                    User.findOneAndUpdate({username: req.body.chatwith},
+                                    {$addToSet: { "chats.0.confirmed": chat._id}},
+                                    {upsert: true,
+                                    new: true},
+                                    function(err, result) {
+                                        if (err) throw err;
+                                        res.json(result);
+                                    });
                                 });
                             }
+                        });
 
-                        } else { // Chat doesnt exist, start new chatlog with user as host.
-                            console.log('friends and chat doesnt exist');
-
-                            var chatinfo = {
-                            host: req.body.username,
-                            users: [
-                                    req.body.username, req.body.chatwith
-                                ],
-                            log: [
-                                    {
-                                        author: req.body.username,
-                                        // append chat
-                                        content: chatmessage,
-                                        timestamp: new Date().toLocaleString(),
-                                    },
-                                ]
-                            };
-
-                            Chat.create(chatinfo, function (error, chat) { // use schema's 'create' method to insert chat document into Mongo
-                                if (error) {
-                                    console.log('error creating new chat');
-                                    return next(error);
-                                } else {
-                                    // add chat to users confirmed list.
-                                    User.findOneAndUpdate({username: req.body.username},
-                                    {$addToSet: { "chats.0.confirmed": chat._id}},
+                        // when users log in they will get all chats in their document.
+                        // send chat and add chat to both users confirmed chats
+                    }
+                } else { // Not friends
+                    console.log("Not friends");
+                    if (booleans[1].chatexists) { // Chat exists
+                        console.log("Chat exists");
+                        let chatinfo = {
+                                author: req.body.username,
+                                content: chatmessage,
+                                timestamp: new Date().toLocaleString(),
+                            }
+                        // if chat is on users confirmed list
+                        if (booleans[2].chatlisted === 'confirmed') {
+                            // send chat
+                            Chat.findOneAndUpdate({_id: chatdata._id},
+                                    {$push: { "log": chatinfo}},
                                     {upsert: true,
                                     new: true}, 
                                     function(err, result) {
                                         if (err) throw err;
-                                        // add chat to chatwith pending list.
-                                        User.findOneAndUpdate({username: req.body.chatwith},
-                                        {$addToSet: { "chats.0.confirmed": chat._id}},
-                                        {upsert: true,
-                                        new: true},
-                                        function(err, result) {
-                                            if (err) throw err;
-                                            res.json(result);
-                                        });
+                                        res.json(result);
                                     });
-                                }
-                            });
-
-                            // when users log in they will get all chats in their document.
-                            // send chat and add chat to both users confirmed chats
-                        }
-                    } else { // Not friends
-                        console.log("Not friends");
-                        if (booleans[1].chatexists) { // Chat exists
-                            console.log("Chat exists");
-                            let chatinfo = {
-                                    author: req.body.username,
-                                    content: chatmessage,
-                                    timestamp: new Date().toLocaleString(),
-                                }
-                            // if chat is on users confirmed list
-                            if (booleans[2].chatlisted === 'confirmed') {
-                                // send chat
-                                Chat.findOneAndUpdate({_id: chatdata._id},
-                                        {$push: { "log": chatinfo}},
+                        } else if (booleans[2].chatlisted === 'pending') {
+                            // take chat off users pending list
+                            User.findOneAndUpdate({username: req.body.username},
+                                    {$pull: { "chats.1.pending": chatdata._id}},
+                                    {upsert: true,
+                                    new: true},
+                                    function(err, result) {
+                                        if (err) throw err;
+                                        // add to confirmed
+                                        User.findOneAndUpdate({username: req.body.username},
+                                        {$push: { "chats.0.confirmed": chatdata._id}},
                                         {upsert: true,
                                         new: true}, 
                                         function(err, result) {
                                             if (err) throw err;
-                                            res.json(result);
-                                        });
-                            } else if (booleans[2].chatlisted === 'pending') {
-                                // take chat off users pending list
-                                User.findOneAndUpdate({username: req.body.username},
-                                        {$pull: { "chats.1.pending": chatdata._id}},
-                                        {upsert: true,
-                                        new: true},
-                                        function(err, result) {
-                                            if (err) throw err;
-                                            // add to confirmed
-                                            User.findOneAndUpdate({username: req.body.username},
-                                            {$push: { "chats.0.confirmed": chatdata._id}},
+                                            // send chat
+                                            Chat.findOneAndUpdate({_id: chatdata._id},
+                                            {$push: { "log": chatinfo}},
                                             {upsert: true,
-                                            new: true}, 
+                                            new: true},
                                             function(err, result) {
                                                 if (err) throw err;
-                                                // send chat
-                                                Chat.findOneAndUpdate({_id: chatdata._id},
-                                                {$push: { "log": chatinfo}},
-                                                {upsert: true,
-                                                new: true},
-                                                function(err, result) {
-                                                    if (err) throw err;
-                                                    res.json(result);
-                                                });
+                                                res.json(result);
                                             });
                                         });
-                            } else {
-                                // you are not a part of this chat
-                                // this logic most likely wont occur
-                                res.json({querystatus: 'You don\'t belong to this chat' });
-                            }
-                        // Not friends & chat does not exist
+                                    });
                         } else {
-                            console.log('not friends and chat doesnt exist');
-                            // start new chatlog with user as host
-                            var chatinfo = {
-                            host: req.body.username,
-                            users: [
-                                    req.body.username, req.body.chatwith
-                                ],
-                            log: [
-                                    {
-                                        author: req.body.username,
-                                        // append chat
-                                        content: chatmessage,
-                                        timestamp: new Date().toLocaleString(),
-                                    },
-                                ]
-                            };
+                            // you are not a part of this chat
+                            // this logic most likely wont occur
+                            res.json({querystatus: 'You don\'t belong to this chat' });
+                        }
+                    // Not friends & chat does not exist
+                    } else {
+                        console.log('not friends and chat doesnt exist');
+                        // start new chatlog with user as host
+                        var chatinfo = {
+                        host: req.body.username,
+                        users: [
+                                req.body.username, req.body.chatwith
+                            ],
+                        log: [
+                                {
+                                    author: req.body.username,
+                                    // append chat
+                                    content: chatmessage,
+                                    timestamp: new Date().toLocaleString(),
+                                },
+                            ]
+                        };
 
-                            // use schema's 'create' method to insert document into Mongo
-                            Chat.create(chatinfo, function (error, chat) {
-                                if (error) {
-                                    console.log('error creating new chat');
-                                    return next(error);
-                                } else {
-                                    // add chat to users confirmed list.
-                                    User.findOneAndUpdate({username: req.body.username},
-                                    {$addToSet: { "chats.0.confirmed": chat._id}},
+                        // use schema's 'create' method to insert document into Mongo
+                        Chat.create(chatinfo, function (error, chat) {
+                            if (error) {
+                                console.log('error creating new chat');
+                                return next(error);
+                            } else {
+                                // add chat to users confirmed list.
+                                User.findOneAndUpdate({username: req.body.username},
+                                {$addToSet: { "chats.0.confirmed": chat._id}},
+                                {upsert: true,
+                                new: true},
+                                function(err, result) {
+                                    if (err) throw err;
+                                    // add chat to chatwith pending list.
+                                    User.findOneAndUpdate({username: req.body.chatwith},
+                                    {$addToSet: { "chats.1.pending": chat._id}},
                                     {upsert: true,
-                                    new: true}, 
+                                    new: true},
                                     function(err, result) {
                                         if (err) throw err;
-                                        // add chat to chatwith pending list.
-                                        User.findOneAndUpdate({username: req.body.chatwith},
-                                        {$addToSet: { "chats.1.pending": chat._id}},
-                                        {upsert: true,
-                                        new: true},
-                                        function(err, result) {
-                                            if (err) throw err;
-                                            res.json(result);
-                                        });
+                                        res.json(result);
                                     });
-                                }
-                            });
+                                });
+                            }
+                        });
 
-
-                            // when users log in they will get all chats in their document.
-
-
-                        }
+                        // when users log in they will get all chats in their document.
                     }
-                })
+                }
             })
-        }
+        })
+    }
+}
+// LOGIN USING CREDENTIALS
+router.post('/login', (req, res, next) => {
+    return loginfunc(req, res, next);
+});
+
+// ATTEMPT REGISTER
+router.post('/register', (req, res, next) => {
+    return registerfunc(req, res, next);
+});
+
+// LOGOUT
+router.get('/logout', (req, res, next) => {
+    return logoutf(req, res, next);
+});
+
+// Base route (unused)
+router.get('/', (req, res, next) => {
+    return mainf(req, res, next);
+});
+
+// SEARCH / GET USERS THAT MATCH THIS QUERY.
+router.post('/searchusers', (req, res, next) => {
+    return searchusersf(req, res, next);
+});
+
+// REQUEST FRIENDSHIP
+router.post('/requestfriendship', (req, res, next) => {
+    return requestfriendshipf(req, res, next);
+});
+
+// REVOKE FRIENDSHIP
+router.post('/revokefriendship', (req, res, next) => {
+    return revokefriendshipf(req, res, next);
+});
+
+// GET PENDING REQUESTS
+router.post('/pendingrequests', (req, res, next) => {
+    return pendingrequestsf(req, res, next);
+})
+
+// ACCEPT FRIEND REQUEST
+router.post('/acceptfriendrequest', (req, res, next) => {
+    return acceptfriendrequestf(req, res, next);
+})
+
+// GET FRIENDS
+router.post('/getfriends', (req, res, next) => {
+    return getfriendsf(req, res, next);
+});
+
+// Gets chat logs
+
+// Reminder, pending doesnt mean not friends, it means the other user has not responded to the chat thus confirming it.
+// Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
+// Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
+
+router.post('/getconversationlogs', (req, res, next) => {
+    return getconversationlogsf(req, res, next);
+});
+
+// Sends chat message to a chat document.
+// If friends, chat doesnt exist, then create chat, make chat confirmed for both
+// If friends, chat exists, forward chat message to chat document
+// If not friends, chat doesnt exist, then create chat make chat pending for other user
+// If not friends, chat exists, forward chat message to chat document, if chat in pending array take chat off pending, put into confirmed.
+router.post('/beginchat', (req, res, next) => {
+    return beginchatf(req, res, next);
 });
 
 
