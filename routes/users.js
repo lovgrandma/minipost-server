@@ -196,18 +196,8 @@ const registerfunc = (req, res, next) => {
     }
 };
 
-router.post('/login', (req, res, next) => {
-    return loginfunc(req, res, next);
-});
 
-// REGISTER
-router.post('/register', (req, res, next) => {
-    return registerfunc(req, res, next);
-});
-
-// LOGOUT
-
-router.get('/logout', (req, res) => {
+const logoutf = (req, res, next) => {
     console.log('/logout');
     if (req.session) {
         // delete session object
@@ -225,20 +215,18 @@ router.get('/logout', (req, res) => {
     } else {
         return res.redirect('/');
     }
-});
+}
 
-// @route GET users friends route 
-
-router.get('/', (req, res) => {
+const mainf = (req, res, next) => {
     console.log('mainroute');
     User.find()
         .then(User => res.json(User))
-});
+}
 
-// SEARCH / GET USERS THAT MATCH THIS QUERY.
-
-router.post('/searchusers', (req, res, next) => {
-//    console.log(req.body.searchusers);
+// Search users that match a specific query. If limit included then return more users in response up to defined limit.
+// Use "req.body.limit" for "Load more" functionality on search
+const searchusersf = (req, res, next) => {
+    //    console.log(req.body.searchusers);
     let searchresults = [];
     if (!req.body.searchusers) {
         res.json({querystatus: 'empty friend search query'});
@@ -286,9 +274,9 @@ router.post('/searchusers', (req, res, next) => {
             });
         }
     }
-});
+}
 
-router.post('/requestfriendship', (req, res, next) => {
+const requestfriendshipf = (req, res, next) => {
     console.log(req.body.thetitleofsomeonewewanttobecloseto, req.body.username);
     if (!req.body.thetitleofsomeonewewanttobecloseto) {
         // stop if there is no information to query.
@@ -336,11 +324,11 @@ router.post('/requestfriendship', (req, res, next) => {
             }
         })
     }
-});
+}
 
-router.post('/revokefriendship', (req, res, next) => {
-    // the following route request either removes a friend from confirmed or pending list. 
-    // req.body.pending is a boolean, confirms if revoke pending request, otherwise its normal revoke friendship
+// the following route request either removes a friend from confirmed or pending list.
+// req.body.pending is a boolean, confirms if revoke pending request, otherwise it is a normal revoke friendship request
+const revokefriendshipf = (req, res, next) => {
     if (!req.body.thetitleofsomeoneiusedtowanttobecloseto) {
         // stop if there is no information to query.
         res.json({querystatus: 'empty friend revoke query'});
@@ -402,12 +390,12 @@ router.post('/revokefriendship', (req, res, next) => {
             });
         }
 
-        if (req.body.refuse) {
+        if (req.body.refuse) { // Refusing a request someone else sent TRUE
             console.log("refuse " + req.body.refuse);
             User.findOne({ username: req.body.username}, {friends: 1}, function(err, result) {
                 if (err) throw err;
                 if (result.friends[1].pending[0]) {
-                    let otheruserpresent = function() {
+                    let otheruserpresent = function() { // Checks if the other requesting user is present in the users pending list. If this is true, down below this function it will remove that user from users own pending list.
                         for (let i = 0; i < result.friends[1].pending.length; i++) {
                             console.log(result.friends[1].pending[i]);
                             if (result.friends[1].pending[i].username == req.body.thetitleofsomeoneiusedtowanttobecloseto) {
@@ -425,15 +413,13 @@ router.post('/revokefriendship', (req, res, next) => {
                 }
             })
         } else {
-
+            // Standard stop being friends functionality. Determines if your own username is present in other users friends list. Puts this into "usernamepresentinconfirmedlist" function. If not true, youre not friends with the person. Do nothing. If true, stopbeingfriends() function is ran.
             User.findOne({username: req.body.thetitleofsomeoneiusedtowanttobecloseto }, {friends: 1}, function(err, result) {
-                console.log(req.body.thetitleofsomeoneiusedtowanttobecloseto, req.body.pending);
+                console.log(req.body.thetitleofsomeoneiusedtowanttobecloseto, "pending? ", req.body.pending);
                 if (!req.body.pending) { // if pending request is not true, user is asking to revoke friendship with friend.
-                // Initial check if user has any friends, if true proceed
-                    if (result.friends[0].confirmed[0]) {
+                    if (result.friends[0].confirmed[0]) { // Initial check if user has any friends, if true proceed
                         let listedconfirmedfriends = result.friends[0].confirmed;
-                        // determine if present in other users confirmed list.
-                        function usernamepresentinconfirmedlist() {
+                        function usernamepresentinconfirmedlist() { // determine if present in other users confirmed list.
                             for (var i = 0; i < listedconfirmedfriends.length; i++) {
                                 if (listedconfirmedfriends[i].username === req.body.username) {
                                     console.log(listedconfirmedfriends[i].username + req.body.username);
@@ -456,22 +442,22 @@ router.post('/revokefriendship', (req, res, next) => {
                     }
                 }
 
-                // Check to remove from pending list regardless
+                // Check to remove yourself from pending list regardless if other functions ran.
                 // determine if present in pending list of asked person.
-                console.log(result.friends[1].pending[0]);
+                console.log("First user in other users pending list " + result.friends[1].pending[0]);
                 console.log(result);
                 if (result.friends[1].pending[0]) {
                     let listedpendingrequests = result.friends[1].pending;
                     function alreadyaskedtobefriends() {
                         for (var i = 0; i < listedpendingrequests.length; i++) {
-                        console.log(listedpendingrequests[i].username);
+                        // console.log(listedpendingrequests[i].username + " on " + req.body.thetitleofsomeoneiusedtowanttobecloseto + "'s pending list");
                             if (listedpendingrequests[i].username === req.body.username) {
                                 return true;
                             }
                         }
                     }
 
-                    // if present remove self from pending list of asked person.
+                    // if present in other users pending list remove self from pending list of asked person.
                     if (alreadyaskedtobefriends()) {
                         console.log('friendship request cancelled');
                         removeselffrompendinglist();
@@ -480,9 +466,10 @@ router.post('/revokefriendship', (req, res, next) => {
             })
         }
     }
-});
+}
 
-router.post('/pendingrequests', (req, res, next) => {
+// Retrieves pending requests in a simple way for signed in user or any username sent with requests.
+const pendingrequestsf = (req, res, next) => {
     // prevent request if username not present 
     if (!req.body.username) {
         res.json({querystatus: 'empty username in query'});
@@ -493,10 +480,11 @@ router.post('/pendingrequests', (req, res, next) => {
             console.log(result.friends[1].pending)
             res.json(result.friends[1].pending);
         });
-    } 
-})
+    }
+}
 
-router.post('/acceptfriendrequest', (req, res, next) => {
+// Function to become friends. Adds users username to newfriend confirmed list and adds newfriend to users confirmed list if not already present.
+const acceptfriendrequestf = (req, res, next) => {
     console.log(req.body.username)
     console.log(req.body.newfriend)
     if (!req.body.newfriend) {
@@ -504,17 +492,17 @@ router.post('/acceptfriendrequest', (req, res, next) => {
     } else if (!req.body.username) {
         res.json({querystatus: 'empty username in query'});
     } else {
-        // function to become friends. Adds username to newfriend confirmed list and adds newfriend to username confirmed list if not already present
-        //AddToSet!!!!!!!
+        // AddToSet functionality in becomefriends() ensures that even if a user is already listed in another users confirmed list, a duplicate is not created. Therefore separate becomefriends() functions do not need to be built. It will update if value is not present.
         let becomefriends = function() {
-            User.findOneAndUpdate({username: req.body.newfriend}, 
+            console.log(req.body.username + " and " + req.body.newfriend + " becoming friends");
+            User.findOneAndUpdate({username: req.body.newfriend}, // Update new friends document.
             {$addToSet: { "friends.0.confirmed": { username: req.body.username}}},
             {upsert: true,
             new: true}, 
             function(err, result) {
                 if (err) throw err;
                 console.log(result)
-                User.findOneAndUpdate({username: req.body.username}, 
+                User.findOneAndUpdate({username: req.body.username}, // Update your own document.
                 {$addToSet: { "friends.0.confirmed": { username: req.body.newfriend}}},
                 {upsert: true,
                 new: true}, 
@@ -526,7 +514,7 @@ router.post('/acceptfriendrequest', (req, res, next) => {
             });
         }
         
-        let removeselffrompendinglist = function() {
+        let removeselffrompendinglist = function() { // Removes your name from other users pending list
             User.findOneAndUpdate({username: req.body.newfriend}, 
             {$pull: { "friends.1.pending": { username: req.body.username}}},
             {new: true}, 
@@ -537,7 +525,7 @@ router.post('/acceptfriendrequest', (req, res, next) => {
             });
         }
         
-        let removefriendfrompendinglist = function() {
+        let removefriendfrompendinglist = function() { // Removes new friend from your pending list
             User.findOneAndUpdate({username: req.body.username}, 
             {$pull: { "friends.1.pending": { username: req.body.newfriend}}},
             {new: true}, 
@@ -548,7 +536,9 @@ router.post('/acceptfriendrequest', (req, res, next) => {
             });
         }
         
-        function newfriendnotpresentinusernameconfirmedlist() { 
+        // Determines if already asked to be friends and removes new friend from your pending list.
+        // If new friend present in your confirmed list already, it will return this entire function as false.
+        function newfriendnotpresentinusernameconfirmedlist() {
             User.findOne({username: req.body.username }, {friends: 1}, function(err, result) {
                 // determine if new friend is present in pending list to clean up pending list.
                 if (result.friends[1].pending[0]) {
@@ -575,14 +565,19 @@ router.post('/acceptfriendrequest', (req, res, next) => {
                     function usernamepresentinconfirmedlist() {
                         for (var i = 0; i < listedconfirmedfriends[i].username; i++) {
                             if (listedconfirmedfriends[i].username === req.body.newfriend) {
-                                return false;
+                                console.log(listedconfirmedfriends[i].username, req.body.newfriend);
+                                return true;
                             }
                         }
+                        return false;
                     }
-                    // if present add self to friends confirmed list and friend to selfs confirmed list.
-                    if (!usernamepresentinconfirmedlist()) {
+
+                    if (usernamepresentinconfirmedlist()) {
                         console.log('new friend already in confirmed list');
                         return false;
+                    } else {
+                        console.log('new friend not in confirmed list');
+                        return true;
                     }
                 }  
             })
@@ -616,42 +611,37 @@ router.post('/acceptfriendrequest', (req, res, next) => {
                     function usernamepresentinconfirmedlist() {
                         for (var i = 0; i < listedconfirmedfriends[i].username; i++) {
                             if (listedconfirmedfriends[i].username === req.body.username) {
-                                return false;
+                                console.log(listedconfirmedfriends[i].username, req.body.username);
+                                return true;
                             }
                         }
+                        return false;
                     }
                     // if present add self to friends confirmed list and friend to selfs confirmed list.
-                    if (!usernamepresentinconfirmedlist()) {
+                    if (usernamepresentinconfirmedlist()) {
                         console.log('username already in friends confirmed list');
                         return false;
+                    } else {
+                        console.log('username not in friends confirmed list');
+                        return true;
                     }
                 }
             })
         }
         
-        newfriendnotpresentinusernameconfirmedlist()
-        usernamenotpresentinnewfriendsconfirmedlist()
+        // These two functions remove either user from pending lists and then determine if either user is
+        // already present in other users confirmed list.
+        // The frontend tries to prevent a user sending a request when one is waiting for them, but if two users can send eachother pending friend requests it will remove both users from both users pending lists.
+        
+        newfriendnotpresentinusernameconfirmedlist();
+        usernamenotpresentinnewfriendsconfirmedlist();
+        
+        // AddToSet functionality in becomefriends() ensures that even if a user is already listed in another users confirmed list, a duplicate is not created. Therefore separate becomefriends() functions do not need to be built. It will update if value is not present.
         becomefriends();
-        
-        
     }
-})
+}
 
-router.post('/getfriends', (req, res, next) => {
-    User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
-        if (err) throw err;
-        let userfriendslist = result.friends[0].confirmed;
-//        console.log('getfriends' + userfriendslist);
-        res.json(userfriendslist);
-    })
-});
-
-// Gets chat logs
-
-// Reminder, pending doesnt mean not friends, it means the other user has not responded to the chat thus confirming it.
-// Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
-
-router.post('/getconversationlogs', (req, res, next) => {
+const getconversationlogsf = (req, res, next) => {
     User.findOne({username: req.body.username}, {chats: 1}, function(err, result) {
         if (err) throw err;
         console.log(result);
@@ -665,7 +655,7 @@ router.post('/getconversationlogs', (req, res, next) => {
                     chatdata = chatdata.toObject();
                     chatdata.pending = "false";
                     chatsArray.push(chatdata);
-                };
+                }
             }
             return chatsArray;
         }
@@ -687,11 +677,69 @@ router.post('/getconversationlogs', (req, res, next) => {
             getPendingChats().then(function(chatsArray) {
                 // console.log(chatsArray + " final chat array");
                 res.json(chatsArray);
-            })
-        })
-        
-    })
+            });
+        });
+    });
+}
+
+// LOGIN USING CREDENTIALS
+router.post('/login', (req, res, next) => {
+    return loginfunc(req, res, next);
+});
+
+// ATTEMPT REGISTER
+router.post('/register', (req, res, next) => {
+    return registerfunc(req, res, next);
+});
+
+// LOGOUT
+router.get('/logout', (req, res, next) => {
+    return logoutf(req, res, next);
+});
+
+// Base route (unused)
+router.get('/', (req, res, next) => {
+    return mainf(req, res, next);
+});
+
+// SEARCH / GET USERS THAT MATCH THIS QUERY.
+router.post('/searchusers', (req, res, next) => {
+    return searchusersf(req, res, next);
+});
+
+router.post('/requestfriendship', (req, res, next) => {
+    return requestfriendshipf(req, res, next);
+});
+
+router.post('/revokefriendship', (req, res, next) => {
+    return revokefriendshipf(req, res, next);
+});
+
+router.post('/pendingrequests', (req, res, next) => {
+    return pendingrequestsf(req, res, next);
 })
+
+router.post('/acceptfriendrequest', (req, res, next) => {
+    return acceptfriendrequestf(req, res, next);
+})
+
+router.post('/getfriends', (req, res, next) => {
+    User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
+        if (err) throw err;
+        let userfriendslist = result.friends[0].confirmed;
+//        console.log('getfriends' + userfriendslist);
+        res.json(userfriendslist);
+    })
+});
+
+// Gets chat logs
+
+// Reminder, pending doesnt mean not friends, it means the other user has not responded to the chat thus confirming it.
+// Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
+
+router.post('/getconversationlogs', (req, res, next) => {
+    return getconversationlogsf(req, res, next);
+});
 
 // Sends chat message to a chat document.
 // If friends, chat doesnt exist, then create chat, make chat confirmed for both
@@ -772,10 +820,10 @@ router.post('/beginchat', (req, res, next) => {
                 let chatslist = await User.findOne({username: req.body.username });
 
                 if (chatslist.chats[0].confirmed.indexOf(chatid) > -1) {
-                    console.log('on confirmed list ' + chatslist.chats[0].confirmed.indexOf(chatid));
+                    console.log('on confirmed list at index ' + chatslist.chats[0].confirmed.indexOf(chatid));
                     booleans.push({ chatlisted: 'confirmed' });
                 } else if (chatslist.chats[1].pending.indexOf(chatid) > -1) {
-                    console.log('on pending list ' + chatslist.chats[1].pending.indexOf(chatid));
+                    console.log('on pending list at index ' + chatslist.chats[1].pending.indexOf(chatid));
                     booleans.push({ chatlisted: 'pending' });
                 }
 
