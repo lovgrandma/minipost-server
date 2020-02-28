@@ -1025,12 +1025,12 @@ router.post('/searchusers', (req, res, next) => {
     let job = reqQueue.add({
         request: request,
     });
-    reqQueue.process(async (job) => {
+    reqQueue.process(function(job, done) {
         console.log(job.data);
-        let returndata = searchusersf(job.data.request, res, next);
+        return searchusersf(job.data.request, res, next);
         done();
-        this.on('completed', job => job.remove());
-        next();
+        // this.on('completed', job => job.remove());
+        throw new Error('some unexpected error');
     });
 });
 
