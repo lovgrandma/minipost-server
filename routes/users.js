@@ -7,7 +7,6 @@ const redisapp = require('../redis');
 const redisclient = redisapp.redisclient;
 
 const Queue = require('bull');
-
 // Redis and bull functionality to queue all incoming requests
 // Redis
 
@@ -24,9 +23,10 @@ redisclient.get('foo', function (error, result) {
     console.log('GET result ->' + result);
 });
 
-//Basic redis request. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
+//Basic bull queue. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
 
 let reqQueue = new Queue('request'); // Bull basic request queue.
+let searchQueue = new Queue('searchQueue'); // Search queue
 
 // All requests could be given basic urgency and be treated the same. Instructions for request would be determined by req.originalUrl . Header info would be put into data and then parsed when taken from binary redis database. Each request must be refactored as a stand alone function that can be called within a job call e.g.
 
@@ -52,7 +52,8 @@ router.use(function(req, res, next) {
 
     reqQueue.add(data, options); // Add job with data and options to queue.
     next(); // sends to next
-})
+});
+
 
 // basic Consumer that begins doing the job using specific function.
 //reqQueue.process(async job => {
@@ -64,7 +65,7 @@ router.use(function(req, res, next) {
 //  console.log(`Job completed with result ${result}`);
 //})
 
-// Queries for main request functionality of minireel.
+// Methods for main request functionality of minireel.
 // LOGIN
 
 // Login function
