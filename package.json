@@ -23,6 +23,7 @@
     "express-session": "^1.15.6",
     "express-validator": "^5.2.0",
     "fs": "0.0.1-security",
+    "json-stringify-safe": "^5.0.1",
     "mongoose": "^5.1.2",
     "morgan": "^1.7.0",
     "nodemon": "^1.17.4",

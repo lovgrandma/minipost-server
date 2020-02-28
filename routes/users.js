@@ -5,6 +5,7 @@ const Chat = require('../models/chat');
 const redis = require('redis');
 const redisapp = require('../redis');
 const redisclient = redisapp.redisclient;
+const stringify = require('json-stringify-safe');
 
 const Queue = require('bull');
 // Redis and bull functionality to queue all incoming requests
@@ -277,6 +278,7 @@ const searchusersf = (req, res, next) => {
                     searchresults.push(result.friends[1].pending)
                     console.log(searchresults);
                     res.json(searchresults);
+                    res.end();
                 });
             });
         }
@@ -1019,7 +1021,17 @@ router.get('/', (req, res, next) => {
 
 // SEARCH / GET USERS THAT MATCH THIS QUERY.
 router.post('/searchusers', (req, res, next) => {
-    return searchusersf(req, res, next);
+    let request = JSON.parse(stringify(req, null));
+    let job = reqQueue.add({
+        request: request,
+    });
+    reqQueue.process(async (job) => {
+        console.log(job.data);
+        let returndata = searchusersf(job.data.request, res, next);
+        done();
+        this.on('completed', job => job.remove());
+        next();
+    });
 });
 
 // REQUEST FRIENDSHIP
