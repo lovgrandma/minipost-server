@@ -39,21 +39,21 @@ let searchQueue = new Queue('searchQueue'); // Search queue
 //    })
 
 
-router.use(function(req, res, next) {
-    // Can create a new queue with Bull. Determine if earlier jobs are running. If not, then next(), else wait.
-
-    console.log("-Redis, bull request req.originalUrl: " + req.originalUrl); // Log url user queried
-    let data = {
-        reqUrl: req.originalUrl
-    }
-
-    let options = {
-        attempts: 2
-    }
-
-    reqQueue.add(data, options); // Add job with data and options to queue.
-    next(); // sends to next
-});
+//router.use(function(req, res, next) {
+//    // Can create a new queue with Bull. Determine if earlier jobs are running. If not, then next(), else wait.
+//
+//    console.log("-Redis, bull request req.originalUrl: " + req.originalUrl); // Log url user queried
+//    let data = {
+//        reqUrl: req.originalUrl
+//    }
+//
+//    let options = {
+//        attempts: 2
+//    }
+//
+//    reqQueue.add(data, options); // Add job with data and options to queue.
+//    next(); // sends to next
+//});
 
 
 // basic Consumer that begins doing the job using specific function.
@@ -1021,17 +1021,7 @@ router.get('/', (req, res, next) => {
 
 // SEARCH / GET USERS THAT MATCH THIS QUERY.
 router.post('/searchusers', (req, res, next) => {
-    let request = JSON.parse(stringify(req, null));
-    let job = reqQueue.add({
-        request: request,
-    });
-    reqQueue.process(function(job, done) {
-        console.log(job.data);
-        return searchusersf(job.data.request, res, next);
-        done();
-        // this.on('completed', job => job.remove());
-        throw new Error('some unexpected error');
-    });
+    return searchusersf(req, res, next);
 });
 
 // REQUEST FRIENDSHIP

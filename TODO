@@ -117,3 +117,26 @@
 //        return next(err);
 //    }
 //});
+
+// old implementation of queue BAD
+
+// SEARCH / GET USERS THAT MATCH THIS QUERY.
+// router.post('/searchusers', (req, res, next) => {
+//   return searchusersf(req, res, next);
+//    let request = JSON.parse(stringify(req, null));
+//    let job = reqQueue.add({
+//        request: request,
+//    });
+//    reqQueue.process(function(job, done) {
+//        console.log(job.data);
+//        return searchusersf(job.data.request, res, next);
+//        done();
+//        // this.on('completed', job => job.remove());
+//        throw new Error('some unexpected error');
+//        next();
+//    });
+//    
+//    reqQueue.on('completed', (job, result) => {
+//        console.log(`Job completed with result ${result}`);
+//    });
+});
