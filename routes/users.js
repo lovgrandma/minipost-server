@@ -242,10 +242,10 @@ const searchusersf = (req, res, next) => {
         if(req.body.limit) { // This determines if there is a body length limit, meaning a request to see more users. This only occurs if user has already made a base search which is done in the else statement.
             User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
                 if (err) throw err;
-                console.log("limitedsearch")
-                console.log("length " + result.length + " / " + req.body.limit);
-                searchresults.push(result.splice(0,req.body.limit));
-                if (result.length > req.body.limit) {
+                console.log("limitedsearch length: " + result.length + " / " + req.body.limit);
+                let resultlength = result.length; // Save length before result array is spliced for accurate comparison later
+                searchresults.push(result.splice(0,req.body.limit)); // Splices result into only 0 to limit, leaving rest in result.
+                if (resultlength > req.body.limit) {
                     searchresults.push({ moreusers: true }); // determines if there are more users to load if another request is made
                 } else {
                     searchresults.push({ moreusers: false });
