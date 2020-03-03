@@ -8,12 +8,8 @@ const redisclient = redisapp.redisclient;
 const stringify = require('json-stringify-safe');
 
 const Queue = require('bull');
+
 // Redis and bull functionality to queue all incoming requests
-// Redis
-
-let redisport = redisapp.redisport;
-let redishost = redisapp.redishost;
-
 // Example redis request
 redisclient.set('foo', 'bar', redis.print);
 redisclient.get('foo', function (error, result) {
@@ -27,7 +23,6 @@ redisclient.get('foo', function (error, result) {
 //Basic bull queue. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
 
 let reqQueue = new Queue('request'); // Bull basic request queue.
-let searchQueue = new Queue('searchQueue'); // Search queue
 
 // All requests could be given basic urgency and be treated the same. Instructions for request would be determined by req.originalUrl . Header info would be put into data and then parsed when taken from binary redis database. Each request must be refactored as a stand alone function that can be called within a job call e.g.
 
@@ -810,8 +805,7 @@ const beginchatf = (req, res, next) => {
                             }
 
                         if (booleans[2].chatlisted === 'pending') {
-                            // take off pending list
-                            // put on confirmed list
+                            // Listed on pending list, but wants to send chat thus making it confirmed. Send chat message to already created chat in db
                             console.log('take off pending list');
                             console.log(chatdata._id)
                             User.findOneAndUpdate({username: req.body.username},
@@ -838,8 +832,7 @@ const beginchatf = (req, res, next) => {
                                             });
                                         });
                                     });
-                        } else if (booleans[2].chatlisted === 'confirmed') {
-                            // send chat
+                        } else if (booleans[2].chatlisted === 'confirmed') { // Chat is already created, listed as confirmed, send chat to db
                             Chat.findOneAndUpdate({_id: chatdata._id},
                             {$push: { "log": chatinfo}},
                             {upsert: true,
