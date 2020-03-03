@@ -30,7 +30,7 @@ exports = module.exports = function(io){
         if (interval) {
             clearInterval(interval);
         }
-        interval = setInterval(() => getApiAndEmit(socket), 5000); // Creates interval after being destroyed
+        interval = setInterval(() => getApiAndEmit(socket), 10000); // Creates interval after being destroyed
 
 
         socket.on("disconnect", () => {
