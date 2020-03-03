@@ -17,6 +17,10 @@ const morgan = require('morgan');
 const redis = require('./redis');
 const app = express();
 
+const server = require('http').createServer(app);
+const io = require('socket.io')(server);
+const socketRoutes = require('./socket')(io);
+
 // parse incoming requests as json and make it accessible from req body property.
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -114,4 +118,6 @@ app.use(function(err, req, res, next) {
 })
 
 const port = process.env.PORT || 5000;
-app.listen(port, () => console.log(`Minireel server started on port ${port}`));
+//server.listen(portSocket, () => console.log(`Listening on port ${portSocket} for socket connections`));
+server.listen(port, () => console.log(`Minireel server started on port ${port}`));
+
