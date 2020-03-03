@@ -69,7 +69,6 @@ const loginfunc = (req, res, next) => {
     console.log(req.body.email);
     if (req.body.email && req.body.password) {
         User.authenticate(req.body.email, req.body.password, function (error, user) {
-            console.log(user);
             if (error || !user) {
                 var err = new Error('Wrong email or password');
                 err.status = 401;
@@ -153,7 +152,7 @@ const registerfunc = (req, res, next) => {
                                     err.type = 'register error';
                                     return next(error);
                                 } else {
-                                    console.log(user);
+                                    console.log(user.lean());
                                     req.session.userId = user._id;
                                     req.session.username = user.username;
                                     let options = {
@@ -173,7 +172,7 @@ const registerfunc = (req, res, next) => {
                             console.log(err);
                             return next(err);
                         }
-                    })
+                    }).lean();
                 } else {
                     var err = new Error('User already exists');
                     err.status = 401;
@@ -188,7 +187,7 @@ const registerfunc = (req, res, next) => {
                 console.log(err);
                 return next(err);
             }
-        })
+        }).lean();
 
         
     } else {
@@ -252,8 +251,8 @@ const searchusersf = (req, res, next) => {
                     searchresults.push(result.friends[1].pending) // Pushes pending
                     console.log(searchresults);
                     res.json(searchresults);
-                })
-            });
+                }).lean();
+            }).lean();
         } else {
         // the following makes a query to the database for users matching the user search input and only returns the username and id. This is the first query which limits the return search to 10 users.
             User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
@@ -274,8 +273,8 @@ const searchusersf = (req, res, next) => {
                     console.log(searchresults);
                     res.json(searchresults);
                     res.end();
-                });
-            });
+                }).lean();
+            }).lean();
         }
     }
 }
@@ -300,10 +299,10 @@ const requestfriendshipf = (req, res, next) => {
                 console.log(result);
                 console.log("addusertopendinglist fired");
                 res.json(result);
-            });
+            }).lean();
         }
         
-        User.findOne({username: req.body.thetitleofsomeonewewanttobecloseto }, {friends: 1}, function(err, result) {
+        User.findOne({username: req.body.thetitleofsomeonewewanttobecloseto}, {friends: 1}, function(err, result) {
             //Auto add to pending list if pending list is empty.
             if (!result.friends[1].pending[0]) {
                 addusertopendinglist();
@@ -326,7 +325,7 @@ const requestfriendshipf = (req, res, next) => {
                     res.json({querystatus: 'already asked to be friends'});
                 }
             }
-        })
+        }).lean();
     }
 }
 
@@ -355,8 +354,8 @@ const revokefriendshipf = (req, res, next) => {
                     console.log(result)
                     console.log("stopbeingfriends()");
                     res.json(result.friends[0].confirmed);
-                });
-            });
+                }).lean();
+            }).lean();
         }
         
         let removeselffrompendinglist = function() {
@@ -374,7 +373,7 @@ const revokefriendshipf = (req, res, next) => {
                         res.json(result.friends[0].confirmed);
                     });
                 }
-            });
+            }).lean();
         }
         
         let removeotherfromownpendinglist = function() {
@@ -390,8 +389,8 @@ const revokefriendshipf = (req, res, next) => {
                     if (err) throw err;
                     console.log("Resulting pending list of " + req.body.username + " " + result.friends[1]);
                     res.json(result.friends[0].confirmed);
-                });
-            });
+                }).lean();
+            }).lean();
         }
 
         if (req.body.refuse) { // Refusing a request someone else sent TRUE
@@ -415,7 +414,7 @@ const revokefriendshipf = (req, res, next) => {
                 } else {
                     res.json({querystatus: 'No pending friends to ignore/refuse'});
                 }
-            })
+            }).lean();
         } else {
             // Standard stop being friends functionality. Determines if your own username is present in other users friends list. Puts this into "usernamepresentinconfirmedlist" function. If not true, youre not friends with the person. Do nothing. If true, stopbeingfriends() function is ran.
             User.findOne({username: req.body.thetitleofsomeoneiusedtowanttobecloseto }, {friends: 1}, function(err, result) {
@@ -467,7 +466,7 @@ const revokefriendshipf = (req, res, next) => {
                         removeselffrompendinglist();
                     }
                 }
-            })
+            }).lean()
         }
     }
 }
@@ -483,7 +482,7 @@ const pendingrequestsf = (req, res, next) => {
             if (err) throw err;
             console.log(result.friends[1].pending)
             res.json(result.friends[1].pending);
-        });
+        }).lean();
     }
 }
 
@@ -505,7 +504,7 @@ const acceptfriendrequestf = (req, res, next) => {
             new: true}, 
             function(err, result) {
                 if (err) throw err;
-                console.log(result)
+                console.log(result);
                 User.findOneAndUpdate({username: req.body.username}, // Update your own document.
                 {$addToSet: { "friends.0.confirmed": { username: req.body.newfriend}}},
                 {upsert: true,
@@ -515,7 +514,7 @@ const acceptfriendrequestf = (req, res, next) => {
                     let userfriendslist = result.friends[0].confirmed;
                     res.json(userfriendslist);
                 });
-            });
+            }).lean();
         }
         
         let removeselffrompendinglist = function() { // Removes your name from other users pending list
@@ -526,7 +525,7 @@ const acceptfriendrequestf = (req, res, next) => {
                 if (err) throw err;
                 console.log('removing self from pending list');
                 console.log(result)
-            });
+            }).lean();
         }
         
         let removefriendfrompendinglist = function() { // Removes new friend from your pending list
@@ -537,7 +536,7 @@ const acceptfriendrequestf = (req, res, next) => {
                 if (err) throw err;
                 console.log('removing friend from pending list');
                 console.log(result)
-            });
+            }).lean();
         }
         
         // Determines if already asked to be friends and removes new friend from your pending list.
@@ -584,7 +583,7 @@ const acceptfriendrequestf = (req, res, next) => {
                         return true;
                     }
                 }  
-            })
+            }).lean();
         }
         
         
@@ -630,7 +629,7 @@ const acceptfriendrequestf = (req, res, next) => {
                         return true;
                     }
                 }
-            })
+            }).lean();
         }
         
         // These two functions remove either user from pending lists and then determine if either user is
@@ -655,8 +654,7 @@ const getconversationlogsf = (req, res, next) => {
         async function getChats() {
             if (result.chats[0]) {
                 for (let i = 0; i < result.chats[0].confirmed.length; i++) {
-                    chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]});
-                    chatdata = chatdata.toObject();
+                    chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]}).lean();
                     chatdata.pending = "false";
                     chatsArray.push(chatdata);
                 }
@@ -668,8 +666,7 @@ const getconversationlogsf = (req, res, next) => {
             if (result.chats[1]) {
                 for (let i = 0; i < result.chats[1].pending.length; i++) {
                     let chatdata = new Map();
-                    chatdata = await Chat.findOne({_id: result.chats[1].pending[i]});
-                    chatdata = chatdata.toObject();
+                    chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
                     chatdata.pending = "true";
                     chatsArray.push(chatdata);
                 }
@@ -683,7 +680,7 @@ const getconversationlogsf = (req, res, next) => {
                 res.json(chatsArray);
             });
         });
-    });
+    }).lean();
 }
 
 const getfriendsf = (req, res, next) => {
@@ -692,7 +689,7 @@ const getfriendsf = (req, res, next) => {
         let userfriendslist = result.friends[0].confirmed;
         //  console.log('getfriends' + userfriendslist);
         res.json(userfriendslist);
-    });
+    }).lean();
 }
 
 const beginchatf = (req, res, next) => {
@@ -707,7 +704,7 @@ const beginchatf = (req, res, next) => {
     } else {
         // determine if user is already friends with chatwith.
         async function getfriendsalready() {
-            let friendsalreadydata = await User.findOne({username: req.body.username }, {friends: 1});
+            let friendsalreadydata = await User.findOne({username: req.body.username }, {friends: 1}).lean();
             // if user has one friend.
             if (friendsalreadydata.friends[0].confirmed[0]) {
                     let listedconfirmedfriends = friendsalreadydata.friends[0].confirmed;
@@ -730,7 +727,7 @@ const beginchatf = (req, res, next) => {
 
         // determine if chat exists between two users.
         async function getchatexists() {
-            let chatexistsdata = await Chat.findOne( { $and: [ {users: req.body.username }, {users: req.body.chatwith }] });
+            let chatexistsdata = await Chat.findOne( { $and: [ {users: req.body.username }, {users: req.body.chatwith }] }).lean();
             chatdata = false;
             if (chatexistsdata) {
                 chatdata = chatexistsdata;
@@ -742,7 +739,7 @@ const beginchatf = (req, res, next) => {
         async function getlistedchattruthiness() {
             let chatid;
             if (chatdata) {
-                let chatslistpre = await User.findOne({username: req.body.username });
+                let chatslistpre = await User.findOne({username: req.body.username }).lean();
                 let chatid = chatdata._id;
                 console.log(chatdata._id);
 
@@ -754,7 +751,7 @@ const beginchatf = (req, res, next) => {
                     {$set: { "chats.0": {confirmed: []}}}, {upsert: true, new: true},
                     function(err, result) {
                         console.log(result);
-                    })
+                    }).lean();
                 }
                 if (!chatslistpre.chats[1]) {
                     console.log('updating pending document for user');
@@ -762,7 +759,7 @@ const beginchatf = (req, res, next) => {
                     {$set: { "chats.1": {pending: [] }}}, {upsert: true, new: true},
                     function(err, result) {
                         console.log(result);
-                    })
+                    }).lean();
                 }
 
                 let chatslist = await User.findOne({username: req.body.username });
@@ -829,9 +826,9 @@ const beginchatf = (req, res, next) => {
                                             function(err, result) {
                                                 if (err) throw err;
                                                 res.json(result);
-                                            });
-                                        });
-                                    });
+                                            }).lean();
+                                        }).lean();
+                                    }).lean();
                         } else if (booleans[2].chatlisted === 'confirmed') { // Chat is already created, listed as confirmed, send chat to db
                             Chat.findOneAndUpdate({_id: chatdata._id},
                             {$push: { "log": chatinfo}},
@@ -840,10 +837,10 @@ const beginchatf = (req, res, next) => {
                             function(err, result) {
                                 if (err) throw err;
                                 res.json(result);
-                            });
+                            }).lean();
                         }
 
-                    } else { // Chat doesnt exist, start new chatlog with user as host.
+                    } else { // Chat doesnt exist, but friends, start new chatlog with user as host.
                         console.log('friends and chat doesnt exist');
 
                         var chatinfo = {
@@ -881,8 +878,8 @@ const beginchatf = (req, res, next) => {
                                     function(err, result) {
                                         if (err) throw err;
                                         res.json(result);
-                                    });
-                                });
+                                    }).lean();
+                                }).lean();
                             }
                         });
 
@@ -908,7 +905,7 @@ const beginchatf = (req, res, next) => {
                                     function(err, result) {
                                         if (err) throw err;
                                         res.json(result);
-                                    });
+                                    }).lean();
                         } else if (booleans[2].chatlisted === 'pending') {
                             // take chat off users pending list
                             User.findOneAndUpdate({username: req.body.username},
@@ -932,9 +929,9 @@ const beginchatf = (req, res, next) => {
                                             function(err, result) {
                                                 if (err) throw err;
                                                 res.json(result);
-                                            });
-                                        });
-                                    });
+                                            }).lean();
+                                        }).lean();
+                                    }).lean();
                         } else {
                             // you are not a part of this chat
                             // this logic most likely wont occur
@@ -980,8 +977,8 @@ const beginchatf = (req, res, next) => {
                                     function(err, result) {
                                         if (err) throw err;
                                         res.json(result);
-                                    });
-                                });
+                                    }).lean();
+                                }).lean();
                             }
                         });
 
