@@ -140,3 +140,63 @@
 //        console.log(`Job completed with result ${result}`);
 //    });
 });
+
+// socket interval
+
+// Ends last interval from old method instance and starts a new one
+//if (interval) {
+//clearInterval(interval);
+//}
+//let intervalVal = (15000);
+//interval = setInterval(() => getApiAndEmit(socket), intervalVal); // Creates interval after being destroyed
+
+// check matching room
+result.forEach((roomAssign, index) => {
+                    if (room == roomAssign) {
+                        console.log("room match");
+                    }
+                });
+                
+                //            let awaitJoin = new Promise((resolve, reject) => {
+//                resolve(socket.join(room));
+//            });
+            
+//            let getRoomData = function(room) {
+//                awaitRoom(room).then(function(data) {
+//                    return data;
+//                })
+//            };
+//            
+//            let awaitRoom = async function(room) {
+//                try {
+//                    await socket.join(room);
+//                } catch(err) {
+//                    throw new Error();
+//                }
+//            }
+//           
+//            let awaitRooms = async function() {
+//                let array = [] = await function() {
+//                    for (let i = 0; i < result.length; i++) {
+//                        console.log(result[i]);
+//                        val = awaitRoom(result[i]);
+//                    }
+//                }
+//            }
+//            
+//            let getData = async () => {
+//                return Promise.all(result.map(room => getRoomData(room)));
+//            }
+////            const getData = async () => {
+////                return Promise.all(result.map(room => awaitRoom(room)));
+////            }
+//            
+////            awaitRooms().then(function() {
+////                console.log(socket.rooms);
+////            });
+//            console.log(socket.rooms);
+//            getData().then(function(data) {
+//                setTimeout(function() {
+//                    console.log(socket.rooms);
+//                }, 500);
+//            });

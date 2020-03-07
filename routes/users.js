@@ -19,6 +19,8 @@ redisclient.get('foo', function (error, result) {
     }
     console.log('GET result ->' + result);
 });
+redisclient.del('foo');
+redisclient.get('foo', redis.print);
 
 //Basic bull queue. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
 
@@ -152,7 +154,7 @@ const registerfunc = (req, res, next) => {
                                     err.type = 'register error';
                                     return next(error);
                                 } else {
-                                    console.log(user.lean());
+                                    console.log(user);
                                     req.session.userId = user._id;
                                     req.session.username = user.username;
                                     let options = {

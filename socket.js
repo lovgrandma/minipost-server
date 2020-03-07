@@ -9,6 +9,7 @@ exports = module.exports = function(io){
     // Test method to test if socket is successfully speaking with client
     let interval;
     let val = 0;
+    let socket;
 
     const getApiAndEmit = async socket => {
         let ts = Date.now();
@@ -16,32 +17,88 @@ exports = module.exports = function(io){
         let am = (hour => 12) ? "pm" : "am";
         // prints date & time in YYYY-MM-DD format
         socket.emit("FromAPI", "Socket io Time: " + year + "-" + month + "-" + date + " | " + (hour % 12) + ":" + minute + ":" + seconds + " " + am); // Emitting a new message. It will be consumed by the client
-        socket.emit("chat", "chat message data" + " " + val);
+    }
+
+    let mapper = function(group) {
+        group = Object.keys(group).map(function(key) {
+            return group[key];
+        });
+        return group;
     }
 
     // On connection note connect, on disconnect note disconnect
     io.on("connection", socket => {
+        console.log(socket.rooms);
         console.log("New client connected");
         // Successful receipt of data being emitted from client, consumed by server
-        socket.on("emit", (data) => {
-            console.log(data + " " + (val+=1));
+        socket.on('join', function(room) {
+            let joinRoom = new Promise((resolve, reject) => {
+                resolve(socket.join(room));
+            })
+            joinRoom.then(() => {
+                console.log(socket.rooms); // The socket id creates a default room and adds the room to the object list
+                let objIterate = 0;
+                let result = Object.keys(socket.rooms).map(function(key) {
+                    return socket.rooms[key];
+                });
+
+                io.to(result[1]).emit("chat", "You are now in room " + room); // emit back to specific room
+            });
         });
-        // Ends last interval from old method instance and starts a new one
-        if (interval) {
-            clearInterval(interval);
-        }
-        interval = setInterval(() => getApiAndEmit(socket), 10000); // Creates interval after being destroyed
+
+        socket.on('joinConvos', async function(rooms) { // Sets users rooms based on conversations
+            let result = await mapper(socket.rooms);
+            for (let i = 0; i < rooms.length; i++) {
+                let roomAdded = false;
+                for (let j = 0; j < result.length; j++) {
+                    if (rooms[i] == result[j]) {
+                        roomAdded = true;
+                    }
+                }
+                if (!roomAdded) {
+                    socket.join(rooms[i]);
+                }
+            }
+
+        })
+
+        socket.on('fetchConvos', async () => { // Confirms convos joined and gets convos from redis
+            result = mapper(socket.rooms);
+            let blurb = "";
+            result.forEach(function(room, index) {
+                let string = room.toString();
+                if (index == result.length) {
+                    blurb = blurb.concat(room);
+                } else {
+                    blurb = blurb.concat(room + ", ");
+                }
+            })
+            // working redis call
+            redisclient.set('moo', 'lar', redis.print);
+            redisclient.get('moo', function (error, result) {
+                if (error) {
+                    console.log(error);
+                    throw error;
+                }
+                console.log('GET result ->' + result);
+            });
+            redisclient.del('moo');
+            redisclient.get('moo', redis.print);
+            // create working mongo call
+            socket.emit("chat", "You are in rooms: " + blurb); // emit back rooms joined
+        })
 
 
         socket.on("disconnect", () => {
             console.log("Client disconnected");
         });
+
     });
 
 
     // Client side
     // When user sends message, wait until socket is created and returns new chat before allowing another chat to be sent. (Spinner animation)
-    // Unless nonfriends, users will not be able to communicate if sockets is not functioning or connecting session.
+    // Unless nonfriends, users will not be able to communicate if sockets is not functioning or connecting session
 
 
     // user to socket
@@ -52,5 +109,9 @@ exports = module.exports = function(io){
     // socket to db
     // On disconnect append redis chat to db. Delete redis chat of this uuid.
     // Will make a query to the database to retrieve chat if no redis existing
+
+    // 2. Socket queries redis
+    // 3. Redis returns chat if chat exists, else redis queries mongo, then returns chat
+    // 4. set chat to state
 
 }
