@@ -80,6 +80,8 @@ exports = module.exports = function(io){
         })
 
         socket.on('fetchConvos', (data) => { // Confirms convos joined and gets convos from redis
+            console.log(socket.rooms);
+            // Take socket room ids and organize them into array to query redis and mongo
             result = mapper(socket.rooms);
             let roomsArr = [];
             result.forEach((room, index) => {
@@ -88,7 +90,7 @@ exports = module.exports = function(io){
                 }
             });
             // working redis call
-            redisclient.set('moo', 'lar', redis.print);
+            redisclient.set('moo', roomsArr[0], redis.print);
             redisclient.get('moo', function (error, result) {
                 if (error) {
                     console.log(error);
@@ -110,8 +112,8 @@ exports = module.exports = function(io){
                 let chatsArray = [];
                 async function getChats() {
                     if (result.chats[0]) {
-                        for (let i = 0; i < result.chats[0].confirmed.length; i++) {
-                            chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]}).lean();
+                        for (let i = 0; i < roomsArr.length; i++) {
+                            chatdata = await Chat.findOne({_id: roomsArr[i]}).lean();
                             chatdata.pending = "false";
                             chatsArray.push(chatdata);
                         }
@@ -119,22 +121,20 @@ exports = module.exports = function(io){
                     return chatsArray;
                 }
 
-                async function getPendingChats() {
-                    if (result.chats[1]) {
-                        for (let i = 0; i < result.chats[1].pending.length; i++) {
-                            let chatdata = new Map();
-                            chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
-                            chatdata.pending = "true";
-                            chatsArray.push(chatdata);
-                        }
-                    }
-                    return chatsArray;
-                }
+//                async function getPendingChats() {
+//                    if (result.chats[1]) {
+//                        for (let i = 0; i < result.chats[1].pending.length; i++) {
+//                            let chatdata = new Map();
+//                            chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
+//                            chatdata.pending = "true";
+//                            chatsArray.push(chatdata);
+//                        }
+//                    }
+//                    return chatsArray;
+//                }
 
                 getChats().then(function(chatsArray) {
-                    getPendingChats().then(function(chatsArray) {
-                        socket.emit("returnConvos", chatsArray); // emit back rooms joined
-                    });
+                    socket.emit("returnConvos", chatsArray); // emit back rooms joined
                 });
             }).lean();
         })
