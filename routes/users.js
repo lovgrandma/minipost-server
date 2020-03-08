@@ -1043,7 +1043,7 @@ router.post('/getfriends', (req, res, next) => {
 
 // Gets chat logs
 
-// Reminder, pending doesnt mean not friends, it means the other user has not responded to the chat thus confirming it.
+// Reminder, pending doesnt mean not friend request, it means the other user has not responded to the chat thus confirming it.
 // Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
 // Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
 

@@ -3,6 +3,10 @@ const redis = require('redis');
 const redisapp = require('./redis');
 const redisclient = redisapp.redisclient;
 const stringify = require('json-stringify-safe');
+const express = require('express');
+const router = express.Router();
+const User = require('./models/user');
+const Chat = require('./models/chat');
 
 exports = module.exports = function(io){
     // Socket io
@@ -59,20 +63,30 @@ exports = module.exports = function(io){
                     socket.join(rooms[i]);
                 }
             }
+            // Functionality for checking if conversation was deleted
+            // Not necessary for now as there is no way to achieve this
+            for (let i = 0; i < result.length; i++) {
+                let leaveRoom = true;
+                for (let j = 0; j < rooms.length; j++) {
+                    if (result[i] == rooms[j]) {
+                        leaveRoom = false;
+                    }
+                }
+                if (leaveRoom && (i != 0)) {
+                    socket.leave(result[i]);
+                }
+            }
 
         })
 
-        socket.on('fetchConvos', async () => { // Confirms convos joined and gets convos from redis
+        socket.on('fetchConvos', (data) => { // Confirms convos joined and gets convos from redis
             result = mapper(socket.rooms);
-            let blurb = "";
-            result.forEach(function(room, index) {
-                let string = room.toString();
-                if (index == result.length) {
-                    blurb = blurb.concat(room);
-                } else {
-                    blurb = blurb.concat(room + ", ");
+            let roomsArr = [];
+            result.forEach((room, index) => {
+                if (room.toString().length > 20 ) { // if length of room id > 20 therefore not the default socket room id
+                    roomsArr.push(room);
                 }
-            })
+            });
             // working redis call
             redisclient.set('moo', 'lar', redis.print);
             redisclient.get('moo', function (error, result) {
@@ -84,8 +98,45 @@ exports = module.exports = function(io){
             });
             redisclient.del('moo');
             redisclient.get('moo', redis.print);
-            // create working mongo call
-            socket.emit("chat", "You are in rooms: " + blurb); // emit back rooms joined
+            // make main call
+            // Use roomsArr to check redis for chats based on room ids. If null, make mongo request.
+            // take mongo object and make redis document
+            // take redis document and put into array, return to user
+            User.findOne({username: data }, {chats: 1}, function(err, result) { // can get rid of this, do not need to get user chats all the time
+                if (err) throw err;
+                console.log(result);
+
+                let chatdata = [];
+                let chatsArray = [];
+                async function getChats() {
+                    if (result.chats[0]) {
+                        for (let i = 0; i < result.chats[0].confirmed.length; i++) {
+                            chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]}).lean();
+                            chatdata.pending = "false";
+                            chatsArray.push(chatdata);
+                        }
+                    }
+                    return chatsArray;
+                }
+
+                async function getPendingChats() {
+                    if (result.chats[1]) {
+                        for (let i = 0; i < result.chats[1].pending.length; i++) {
+                            let chatdata = new Map();
+                            chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
+                            chatdata.pending = "true";
+                            chatsArray.push(chatdata);
+                        }
+                    }
+                    return chatsArray;
+                }
+
+                getChats().then(function(chatsArray) {
+                    getPendingChats().then(function(chatsArray) {
+                        socket.emit("returnConvos", chatsArray); // emit back rooms joined
+                    });
+                });
+            }).lean();
         })
 
 
