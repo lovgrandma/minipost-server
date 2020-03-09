@@ -9,60 +9,6 @@ const stringify = require('json-stringify-safe');
 
 const Queue = require('bull');
 
-// Redis and bull functionality to queue all incoming requests
-// Example redis request
-redisclient.set('foo', 'bar', redis.print);
-redisclient.get('foo', function (error, result) {
-    if (error) {
-        console.log(error);
-        throw error;
-    }
-    console.log('GET result ->' + result);
-});
-redisclient.del('foo');
-redisclient.get('foo', redis.print);
-
-//Basic bull queue. Should queue all queries except queries to main page. Necessary for basic performance with large set of users.
-
-let reqQueue = new Queue('request'); // Bull basic request queue.
-
-// All requests could be given basic urgency and be treated the same. Instructions for request would be determined by req.originalUrl . Header info would be put into data and then parsed when taken from binary redis database. Each request must be refactored as a stand alone function that can be called within a job call e.g.
-
-// 1. queue is created above. like let queue = new Queue('videoQueue');
-// 2. Create data in form of array. like let data = { reqUrl: req.originalUrl, otherstuff: stuff }
-// 3. Do queue.add(data, options)
-// 4. reqQueue.process(async job => {
-//      await RouteFunction(job.data);
-//    })
-
-
-//router.use(function(req, res, next) {
-//    // Can create a new queue with Bull. Determine if earlier jobs are running. If not, then next(), else wait.
-//
-//    console.log("-Redis, bull request req.originalUrl: " + req.originalUrl); // Log url user queried
-//    let data = {
-//        reqUrl: req.originalUrl
-//    }
-//
-//    let options = {
-//        attempts: 2
-//    }
-//
-//    reqQueue.add(data, options); // Add job with data and options to queue.
-//    next(); // sends to next
-//});
-
-
-// basic Consumer that begins doing the job using specific function.
-//reqQueue.process(async job => {
-//        await dofunction(job.data);
-//})
-
-// basic Listener.
-//myFirstQueue.on('completed', (job, result) => {
-//  console.log(`Job completed with result ${result}`);
-//})
-
 // Methods for main request functionality of minireel.
 // LOGIN
 
@@ -694,6 +640,7 @@ const getfriendsf = (req, res, next) => {
     }).lean();
 }
 
+// Change functionality of this to redis first, mongo second
 const beginchatf = (req, res, next) => {
     console.log(req.body.username, req.body.chatwith, req.body.message);
     let booleans = [];
@@ -842,7 +789,7 @@ const beginchatf = (req, res, next) => {
                             }).lean();
                         }
 
-                    } else { // Chat doesnt exist, but friends, start new chatlog with user as host.
+                    } else { // Chat doesnt exist, but still friends, start new chatlog with user as host.
                         console.log('friends and chat doesnt exist');
 
                         var chatinfo = {

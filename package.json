@@ -10,6 +10,7 @@
   "license": "MIT",
   "dependencies": {
     "bcrypt": "^3.0.8",
+    "bluebird": "^3.7.2",
     "body-parser": "^1.18.3",
     "bull": "^3.13.0",
     "bull-arena": "^2.7.1",
@@ -30,6 +31,7 @@
     "path": "^0.12.7",
     "pug": "^2.0.3",
     "redis": "^2.8.0",
+    "redis-rejson": "^1.0.0",
     "socket.io": "^2.3.0",
     "universal-cookie": "^3.0.4",
     "uuid": "^3.3.2"

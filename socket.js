@@ -1,6 +1,9 @@
 // Sockets routes
 const redis = require('redis');
+const rejson = require('redis-rejson');
 const redisapp = require('./redis');
+const bluebird = require('bluebird'); // Allows promisfying of redis calls, important for simplified returning key-values for redis calls
+bluebird.promisifyAll(redis);
 const redisclient = redisapp.redisclient;
 const stringify = require('json-stringify-safe');
 const express = require('express');
@@ -15,12 +18,68 @@ exports = module.exports = function(io){
     let val = 0;
     let socket;
 
-    const getApiAndEmit = async socket => {
-        let ts = Date.now();
-        let date_ob = new Date(ts); let date = date_ob.getDate(); let month = date_ob.getMonth() + 1; let year = date_ob.getFullYear(); let hour = date_ob.getHours(); let minute = date_ob.getMinutes(); let seconds = date_ob.getSeconds();
-        let am = (hour => 12) ? "pm" : "am";
-        // prints date & time in YYYY-MM-DD format
-        socket.emit("FromAPI", "Socket io Time: " + year + "-" + month + "-" + date + " | " + (hour % 12) + ":" + minute + ":" + seconds + " " + am); // Emitting a new message. It will be consumed by the client
+    // Updates redis db with a single chat
+    let sendChat = async (socket, data) => {
+        // If redis chat returns null, check mongo for chat.
+        // If mongo returns null run shortened "beginchat" method for redis
+        // Add log and set created chat in redis
+        // return chat to user
+        console.log(data);
+        let getChat = async (data) => {
+            let temp = await redisclient.getAsync(data.id);
+            if (!temp) {
+                temp = await Chat.findOne({_id: room}).lean();
+                if (!chat) {
+                    // create chat in external method
+                }
+            }
+            temp = JSON.parse(temp);
+            let chatinfo = {
+                author: data.user,
+                content: data.message,
+                timestamp: new Date().toLocaleString(),
+            }
+            temp.log.push(chatinfo); // appends value to temporary chat object
+            redisclient.set(data.id, JSON.stringify(temp));
+            chatinfo.id = data.id;
+            io.to(data.id).emit('chat', chatinfo); // Send small chats back instead of entire chat object
+        }
+
+        getChat(data);
+    }
+
+    // Gets conversations from redis using socket rooms.
+    // If redis call does not return a value, query mongo for chat based on room id. Set to redis key and query redis again
+    // Parse into json and then return. Resolve as a promise and emit to user
+    let fetchConvos = async (socket, data) => {
+        // Take socket room ids and organize them into array to query redis and mongo
+        result = mapper(socket.rooms);
+        let roomsArr = [];
+        result.forEach((room, index) => {
+            if (room.toString().length > 20 ) { // if length of room id > 20 therefore not the default socket room id
+                roomsArr.push(room);
+            }
+        });
+
+        let getChat = async (room) => { // Attempt to get room from redis, if null, create one from mongo query.
+            let temp = await redisclient.getAsync(room);
+            if (!temp) {
+                chat = await Chat.findOne({_id: room}).lean();
+                // console.log(chat);
+                redisclient.set(room, JSON.stringify(chat));
+                temp = await redisclient.getAsync(room);
+            }
+            temp = await JSON.parse(temp);
+            return temp;
+        }
+        let promises = roomsArr.map(room => {
+            return new Promise((resolve, reject) => {
+                resolve(getChat(room));
+            })
+        });
+
+        let rooms = await Promise.all(promises);
+        socket.emit("returnConvos", rooms); // emit back rooms joined
     }
 
     let mapper = function(group) {
@@ -29,6 +88,7 @@ exports = module.exports = function(io){
         });
         return group;
     }
+
 
     // On connection note connect, on disconnect note disconnect
     io.on("connection", socket => {
@@ -50,7 +110,9 @@ exports = module.exports = function(io){
             });
         });
 
-        socket.on('joinConvos', async function(rooms) { // Sets users rooms based on conversations
+        socket.on('joinConvos', async function(obj) { // Sets users rooms based on conversations
+            let rooms = obj.ids;
+            let user = obj.user;
             let result = await mapper(socket.rooms);
             for (let i = 0; i < rooms.length; i++) {
                 let roomAdded = false;
@@ -59,12 +121,12 @@ exports = module.exports = function(io){
                         roomAdded = true;
                     }
                 }
-                if (!roomAdded) {
-                    socket.join(rooms[i]);
+                if (roomAdded) { // If room added already, take out of array of rooms to join socket to
+                    rooms.splice(rooms[i]);
                 }
             }
-            // Functionality for checking if conversation was deleted
-            // Not necessary for now as there is no way to achieve this
+            // Functionality for checking if conversation was deleted, leaves room
+            // Not necessary for now as this is not implemented on client side
             for (let i = 0; i < result.length; i++) {
                 let leaveRoom = true;
                 for (let j = 0; j < rooms.length; j++) {
@@ -72,75 +134,38 @@ exports = module.exports = function(io){
                         leaveRoom = false;
                     }
                 }
-                if (leaveRoom && (i != 0)) {
+                if (leaveRoom && (i != 0)) { // leaves room if not present in rooms to join
                     socket.leave(result[i]);
                 }
             }
 
+            // Creates promise to join user into rooms existing in rooms array
+            let promises = rooms.map(room => {
+                return new Promise((resolve, reject) => {
+                    socket.join(room, (err) => {
+                        if(err) reject(err);
+                        else resolve(room);
+                    })
+                })
+            })
+
+            const reflect = p => p.then(v => ({v, status: "fulfilled" }), // Condition for determining truthiness of promise
+                            e => ({e, status: "rejected" }));
+            // Returns the results of the promise to add socket to rooms
+            let addedRooms = (await Promise.all(promises.map(reflect))).filter(o => o.status !== 'rejected').map(o => o.v);
+            let checkRooms = Object.keys(socket.rooms); // Gets socket rooms These effectively will be the same excluding the main socket. Can check both of these variables in a console log.
+            fetchConvos(socket, user); // Fetch convos method
+        })
+
+        socket.on('sendChat', (data) => { // Updates redis db with new chat
+            sendChat(socket, data);
         })
 
         socket.on('fetchConvos', (data) => { // Confirms convos joined and gets convos from redis
-            console.log(socket.rooms);
-            // Take socket room ids and organize them into array to query redis and mongo
-            result = mapper(socket.rooms);
-            let roomsArr = [];
-            result.forEach((room, index) => {
-                if (room.toString().length > 20 ) { // if length of room id > 20 therefore not the default socket room id
-                    roomsArr.push(room);
-                }
-            });
-            // working redis call
-            redisclient.set('moo', roomsArr[0], redis.print);
-            redisclient.get('moo', function (error, result) {
-                if (error) {
-                    console.log(error);
-                    throw error;
-                }
-                console.log('GET result ->' + result);
-            });
-            redisclient.del('moo');
-            redisclient.get('moo', redis.print);
-            // make main call
-            // Use roomsArr to check redis for chats based on room ids. If null, make mongo request.
-            // take mongo object and make redis document
-            // take redis document and put into array, return to user
-            User.findOne({username: data }, {chats: 1}, function(err, result) { // can get rid of this, do not need to get user chats all the time
-                if (err) throw err;
-                console.log(result);
-
-                let chatdata = [];
-                let chatsArray = [];
-                async function getChats() {
-                    if (result.chats[0]) {
-                        for (let i = 0; i < roomsArr.length; i++) {
-                            chatdata = await Chat.findOne({_id: roomsArr[i]}).lean();
-                            chatdata.pending = "false";
-                            chatsArray.push(chatdata);
-                        }
-                    }
-                    return chatsArray;
-                }
-
-//                async function getPendingChats() {
-//                    if (result.chats[1]) {
-//                        for (let i = 0; i < result.chats[1].pending.length; i++) {
-//                            let chatdata = new Map();
-//                            chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
-//                            chatdata.pending = "true";
-//                            chatsArray.push(chatdata);
-//                        }
-//                    }
-//                    return chatsArray;
-//                }
-
-                getChats().then(function(chatsArray) {
-                    socket.emit("returnConvos", chatsArray); // emit back rooms joined
-                });
-            }).lean();
+            fetchConvos(socket, data);
         })
 
-
-        socket.on("disconnect", () => {
+        socket.on("disconnect", () => { // Should update mongodb on every disconnect
             console.log("Client disconnected");
         });
 
