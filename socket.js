@@ -86,6 +86,7 @@ exports = module.exports = function(io){
         socket.emit("returnConvos", rooms); // emit back rooms joined
     }
 
+    // mapper method
     let mapper = function(group) {
         group = Object.keys(group).map(function(key) {
             return group[key];
