@@ -266,9 +266,21 @@ const requestfriendshipf = (req, res, next) => {
                     console.log("listedpendingrequests fired");
                     }
                 }
+                function alreadyFriends() {
+                    for (let i = 0; i < result.friends[0].confirmed.length; i++) {
+                        if (req.body.thetitleofsomeonewewanttobecloseto == result.friends[0].confirmed[i]) {
+                            console.log(result.friends[0].confirmed[i]);
+                            return true;
+                        }
+                    }
+                }
                 // if user does not exist in pending list, add user to list.
                 if (!alreadyaskedtobefriends()) {
+                    if (!alreadyFriends()) {
                         addusertopendinglist();
+                    } else {
+                        res.json({querystatus: 'already friends'});
+                    }
                 } else {
                     res.json({querystatus: 'already asked to be friends'});
                 }
@@ -280,12 +292,15 @@ const requestfriendshipf = (req, res, next) => {
 // the following route request either removes a friend from confirmed or pending list.
 // req.body.pending is a boolean, confirms if revoke pending request, otherwise it is a normal revoke friendship request
 const revokefriendshipf = (req, res, next) => {
+    let resEnd = false;
     if (!req.body.thetitleofsomeoneiusedtowanttobecloseto) {
         // stop if there is no information to query.
         res.json({querystatus: 'empty friend revoke query'});
+        resEnd = true;
     } else if (req.body.thetitleofsomeoneiusedtowanttobecloseto === req.body.username) {
         // prevent asking self for friend request on server side
         res.json({querystatus: 'cant stop being friends with yourself :/'});
+        resEnd = true;
     } else {
         let stopbeingfriends = function() {
             User.findOneAndUpdate({username: req.body.thetitleofsomeoneiusedtowanttobecloseto}, 
@@ -301,7 +316,10 @@ const revokefriendshipf = (req, res, next) => {
                     if (err) throw err;
                     console.log(result)
                     console.log("stopbeingfriends()");
-                    res.json(result.friends[0].confirmed);
+                    if (!resEnd) {
+                        res.json(result.friends[0].confirmed);
+                        resEnd = true;
+                    }
                 }).lean();
             }).lean();
         }
@@ -319,6 +337,7 @@ const revokefriendshipf = (req, res, next) => {
                     User.findOne({username: req.body.username},
                     function(err, result) {
                         res.json(result.friends[0].confirmed);
+                        resEnd = true;
                     });
                 }
             }).lean();
@@ -337,6 +356,7 @@ const revokefriendshipf = (req, res, next) => {
                     if (err) throw err;
                     console.log("Resulting pending list of " + req.body.username + " " + result.friends[1]);
                     res.json(result.friends[0].confirmed);
+                    resEnd = true;
                 }).lean();
             }).lean();
         }
@@ -361,6 +381,7 @@ const revokefriendshipf = (req, res, next) => {
                     }
                 } else {
                     res.json({querystatus: 'No pending friends to ignore/refuse'});
+                    resEnd = true;
                 }
             }).lean();
         } else {
@@ -383,6 +404,7 @@ const revokefriendshipf = (req, res, next) => {
                         if (!usernamepresentinconfirmedlist()) { // if not present in confirmed list, not friends.
                             console.log('initial friendship check');
                             res.json({querystatus: req.body.thetitleofsomeoneiusedtowanttobecloseto + ' is not friends with you'});
+                            resEnd = true;
                         } else {
                             console.log('a friendship revoked');
                             stopbeingfriends();
@@ -390,6 +412,7 @@ const revokefriendshipf = (req, res, next) => {
 
                     } else { // other user has no friends, no point in unfriending
                         res.json({querystatus: req.body.thetitleofsomeoneiusedtowanttobecloseto + ' has no friends, you cannot unfriend them'});
+                        resEnd = true;
                     }
                 }
 
@@ -402,7 +425,7 @@ const revokefriendshipf = (req, res, next) => {
                     function alreadyaskedtobefriends() {
                         for (var i = 0; i < listedpendingrequests.length; i++) {
                         // console.log(listedpendingrequests[i].username + " on " + req.body.thetitleofsomeoneiusedtowanttobecloseto + "'s pending list");
-                            if (listedpendingrequests[i].username === req.body.username) {
+                            if (listedpendingrequests[i].username === req.body.username) { // Finds out if user is on other users pending list
                                 return true;
                             }
                         }
@@ -412,6 +435,16 @@ const revokefriendshipf = (req, res, next) => {
                     if (alreadyaskedtobefriends()) {
                         console.log('friendship request cancelled');
                         removeselffrompendinglist();
+                    } else {
+                        if (!resEnd) {
+                            res.json({querystatus: 'not on other users pending list'});
+                            resEnd = true;
+                        }
+                    }
+                } else {
+                    if (!resEnd) {
+                        res.json({querystatus: 'not on other users pending list'});
+                        resEnd = true;
                     }
                 }
             }).lean()
