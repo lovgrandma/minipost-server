@@ -12,10 +12,9 @@ const User = require('./models/user');
 const Chat = require('./models/chat');
 
 exports = module.exports = function(io){
+
     // Socket io
     // Test method to test if socket is successfully speaking with client
-    let interval;
-    let val = 0;
     let socket;
 
     // Updates redis db with a single chat
@@ -111,8 +110,14 @@ exports = module.exports = function(io){
         });
 
         socket.on('joinConvos', async function(obj) { // Sets users rooms based on conversations
+            console.log("s: joinConvos");
             let rooms = obj.ids;
             let user = obj.user;
+            let mongoConvos = await User.findOne({username: user }, { chats: 1 });
+            console.log("mongo convos " + mongoConvos);
+            console.log(mongoConvos.chats);
+
+
             let result = await mapper(socket.rooms);
             for (let i = 0; i < rooms.length; i++) {
                 let roomAdded = false;
@@ -123,6 +128,30 @@ exports = module.exports = function(io){
                 }
                 if (roomAdded) { // If room added already, take out of array of rooms to join socket to
                     rooms.splice(rooms[i]);
+                }
+            }
+
+            for (let i = 0; i < mongoConvos.chats[0].confirmed.length; i++) {
+                let add = true;
+                for (let j = 0; j < result.length; j++) {
+                    if (mongoConvos.chats[0].confirmed[i] == rooms[j]) {
+                        add = false;
+                    }
+                }
+                if (add) {
+                    rooms.push(mongoConvos.chats[0].confirmed[i]);
+                }
+            }
+
+            for (let i = 0; i < mongoConvos.chats[1].pending.length; i++) {
+                let add = true;
+                for (let j = 0; j < result.length; j++) {
+                    if (mongoConvos.chats[1].pending[i] == rooms[j]) {
+                        add = false;
+                    }
+                }
+                if (add) {
+                    rooms.push(mongoConvos.chats[1].pending[i]);
                 }
             }
             // Functionality for checking if conversation was deleted, leaves room
@@ -154,6 +183,8 @@ exports = module.exports = function(io){
             // Returns the results of the promise to add socket to rooms
             let addedRooms = (await Promise.all(promises.map(reflect))).filter(o => o.status !== 'rejected').map(o => o.v);
             let checkRooms = Object.keys(socket.rooms); // Gets socket rooms These effectively will be the same excluding the main socket. Can check both of these variables in a console log.
+            console.log(addedRooms);
+            console.log(checkRooms);
             fetchConvos(socket, user); // Fetch convos method
         })
 
