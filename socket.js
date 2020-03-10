@@ -17,6 +17,11 @@ exports = module.exports = function(io){
     // Test method to test if socket is successfully speaking with client
     let socket;
 
+    let updateType = async (socket, data) => {
+        console.log(data);
+        io.to(data.room).emit('typing', data); // echo typing data back to room
+    }
+
     // Updates redis db with a single chat
     let sendChat = async (socket, data) => {
         // If redis chat returns null, check mongo for chat.
@@ -188,6 +193,9 @@ exports = module.exports = function(io){
             fetchConvos(socket, user); // Fetch convos method
         })
 
+        socket.on('typing', (data) => {
+            updateType(socket, data);
+        })
         socket.on('sendChat', (data) => { // Updates redis db with new chat
             sendChat(socket, data);
         })
