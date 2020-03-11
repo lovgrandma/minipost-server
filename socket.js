@@ -76,6 +76,7 @@ exports = module.exports = function(io){
             temp = await JSON.parse(temp);
             return temp;
         }
+
         let promises = roomsArr.map(room => {
             return new Promise((resolve, reject) => {
                 resolve(getChat(room));
