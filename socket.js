@@ -120,8 +120,8 @@ exports = module.exports = function(io){
             console.log("s: joinConvos");
             let rooms = obj.ids;
             let user = obj.user;
-            let mongoConvos = await User.findOne({username: user }, { chats: 1 });
-            console.log("mongo convos " + mongoConvos);
+            let mongoConvos = await User.findOne({username: user }, { chats: 1 }).lean();
+            console.log("mongo convo vvv");
             console.log(mongoConvos.chats);
 
 
@@ -210,6 +210,10 @@ exports = module.exports = function(io){
             console.log("Client disconnected");
         });
 
+    });
+
+    io.on('reconnect_attempt', () => {
+        socket.io.opts.transports = ['polling', 'websocket'];
     });
 
 
