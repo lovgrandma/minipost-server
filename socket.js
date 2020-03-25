@@ -18,10 +18,18 @@ exports = module.exports = function(io){
     // Test method to test if socket is successfully speaking with client
     let socket;
 
-    let updateType = async (socket, data) => {
-        let decom = lzw.decompress(data); // decompress data to check which room to send to.
-        const regex = /(.*);(.*);(.*)/;
-        io.to(decom.match(regex)[3]).emit('typing', data); // echo typing data back to room
+    let updateType = (socket, data) => {
+        let promise = new Promise(function(resolve, reject) {
+            let decom = lzw.decompress(data); // decompress data to check which room to send to.
+            const regex = /([a-z0-9.]*);([^]*);(.*)/;
+            if (decom) {
+                io.to(decom.match(regex)[3]).emit('typing', data); // echo typing data back to room
+                resolve("complete");
+            } else {
+                reject(new Error("String too complex to be decompressed for typing update"));
+            }
+        });
+        promise.catch(error => console.log(error.message));
     }
 
     // Updates redis db with a single chat
