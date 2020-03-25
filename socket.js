@@ -10,6 +10,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('./models/user');
 const Chat = require('./models/chat');
+const lzw = require('./compression/lzw');
 
 exports = module.exports = function(io){
 
@@ -18,8 +19,9 @@ exports = module.exports = function(io){
     let socket;
 
     let updateType = async (socket, data) => {
-        console.log(data);
-        io.to(data.room).emit('typing', data); // echo typing data back to room
+        let decom = lzw.decompress(data); // decompress data to check which room to send to.
+        const regex = /(.*);(.*);(.*)/;
+        io.to(decom.match(regex)[3]).emit('typing', data); // echo typing data back to room
     }
 
     // Updates redis db with a single chat
@@ -30,12 +32,12 @@ exports = module.exports = function(io){
         // return chat to user
         console.log(data);
         let getChat = async (data) => {
+            console.log("data " + data.id); // chat data has id, chatwith, message, and user
             let temp = await redisclient.getAsync(data.id);
             if (!temp) {
-                temp = await Chat.findOne({_id: room}).lean();
-                if (!chat) {
-                    // create chat in external method
-                }
+                // The only way this would fail is if somehow the chat was deleted after the user loaded up the page.
+                // The application defaults to load from mongo on load. No chats should be deleted. Only hidden if a user is blocked
+                temp = await Chat.findOne({_id: data.id}).lean();
             }
             temp = JSON.parse(temp);
             let chatinfo = {
@@ -45,6 +47,17 @@ exports = module.exports = function(io){
             }
             temp.log.push(chatinfo); // appends value to temporary chat object
             redisclient.set(data.id, JSON.stringify(temp));
+            console.log(temp);
+            console.log(temp.log.length);
+            if ((temp.log.length)%100 == 0) { // update mongo every 100 logs, else socket will take from redis
+                // If query finds a mongo conversation with this id, update the log
+                // Will only fire once as this fires when a user sends a chat. If the chat length at that time of updates' remainder of X amount is 0, then update mongo. Copies whole redis log, does not push.
+                if (await Chat.findOne({_id: data.id}).lean()) {
+                    Chat.findOneAndUpdate({_id: temp._id }, {"log": temp.log}, { new: true }, function(err, result) {
+                        console.log("Updated");
+                    });
+                }
+            }
             chatinfo.id = data.id;
             io.to(data.id).emit('chat', chatinfo); // Send small chats back instead of entire chat object
         }
@@ -138,7 +151,7 @@ exports = module.exports = function(io){
                 }
             }
 
-            for (let i = 0; i < mongoConvos.chats[0].confirmed.length; i++) {
+            for (let i = 0; i < mongoConvos.chats[0].confirmed.length; i++) { // get all confirmed chats
                 let add = true;
                 for (let j = 0; j < result.length; j++) {
                     if (mongoConvos.chats[0].confirmed[i] == rooms[j]) {
@@ -150,7 +163,7 @@ exports = module.exports = function(io){
                 }
             }
 
-            for (let i = 0; i < mongoConvos.chats[1].pending.length; i++) {
+            for (let i = 0; i < mongoConvos.chats[1].pending.length; i++) { // get all pending chats
                 let add = true;
                 for (let j = 0; j < result.length; j++) {
                     if (mongoConvos.chats[1].pending[i] == rooms[j]) {
@@ -161,8 +174,8 @@ exports = module.exports = function(io){
                     rooms.push(mongoConvos.chats[1].pending[i]);
                 }
             }
-            // Functionality for checking if conversation was deleted, leaves room
-            // Not necessary for now as this is not implemented on client side
+            // Functionality for checking if conversation was deleted, leaves deleted room of socket session
+            // Somewhat uneccesary for now as this is not implemented on client side. Should still work while user is connected to socket
             for (let i = 0; i < result.length; i++) {
                 let leaveRoom = true;
                 for (let j = 0; j < rooms.length; j++) {
@@ -198,6 +211,7 @@ exports = module.exports = function(io){
         socket.on('typing', (data) => {
             updateType(socket, data);
         })
+
         socket.on('sendChat', (data) => { // Updates redis db with new chat
             sendChat(socket, data);
         })

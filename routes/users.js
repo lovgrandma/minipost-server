@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/user');
 const Chat = require('../models/chat');
+const uuidv4 = require('uuid/v4');
 const redis = require('redis');
 const redisapp = require('../redis');
 const redisclient = redisapp.redisclient;
@@ -837,55 +838,59 @@ const beginchatf = (req, res, next) => {
                 } else { // Chat doesnt exist, but still friends, start new chatlog with user as host.
                     console.log('chat doesnt exist');
 
-                    let chatinfo = {
-                        host: req.body.username,
-                        users: [
-                            req.body.username, req.body.chatwith
-                        ],
-                        log: [
-                            {
-                                author: req.body.username,
-                                content: chatmessage, // chat to append
-                                timestamp: new Date().toLocaleString(),
-                            },
-                        ]
-                    };
+                    let generateUuid = async (data) => {
+                        let temp;
+                        let uuidTaken;
+                        do {
+                            temp = uuidv4(); // create new uuid
+                            console.log("temp " + temp);
+                            uuidTaken = await Chat.findOne({_id: temp}).lean(); // check if uuid is taken
+                            console.log("uuid taken? " + uuidTaken);
+                        } while (uuidTaken); // if uuid is taken, run again and create new uuid
+                        return temp;
+                    }
 
-                    Chat.create(chatinfo, function (error, chat) { // use schema's 'create' method to insert chat document into Mongo
-                        if (error) {
-                            console.log('error creating new chat');
-                            return next(error);
-                        } else {
-                            // add chat to users confirmed list.
-                            User.findOneAndUpdate({username: req.body.username},
-                                {$addToSet: { "chats.0.confirmed": chat._id}},
-                                {upsert: true,
-                                new: true}, 
-                                function(err, result) {
+                    generateUuid().then(function(temp) {
+                        let chatinfo = {
+                            _id: temp,
+                            host: req.body.username,
+                            users: [
+                                req.body.username, req.body.chatwith
+                            ],
+                            log: [
+                                {
+                                    author: req.body.username,
+                                    content: chatmessage, // chat to append
+                                    timestamp: new Date().toLocaleString(),
+                                },
+                            ]
+                        };
+
+                        Chat.create(chatinfo, function (error, chat) { // use schema's 'create' method to insert chat document into Mongo
+                            if (error) {
+                                console.log('error creating new chat');
+                                return next(error);
+                            } else {
+                                // add chat to users confirmed list.
+                                User.findOneAndUpdate({username: req.body.username}, {$addToSet: { "chats.0.confirmed": chat._id}}, {upsert: true, new: true}, function(err, result) {
                                     if (err) throw err;
-                                // add chat to chatwith pending list.
-                                if (booleans[0].friends) {
-                                    User.findOneAndUpdate({username: req.body.chatwith},
-                                        {$addToSet: { "chats.0.confirmed": chat._id}},
-                                        {upsert: true,
-                                        new: true},
-                                        function(err, result) {
+                                    // add chat to chatwith pending list.
+                                    if (booleans[0].friends) {
+                                        User.findOneAndUpdate({username: req.body.chatwith}, {$addToSet: { "chats.0.confirmed": chat._id}}, {upsert: true, new: true}, function(err, result) {
                                             if (err) throw err;
                                             res.json(result);
-                                    }).lean();
-                                } else {
-                                    User.findOneAndUpdate({username: req.body.chatwith},
-                                        {$addToSet: { "chats.1.pending": chat._id}},
-                                        {upsert: true,
-                                        new: true},
-                                        function(err, result) {
+                                        }).lean();
+                                    } else {
+                                        User.findOneAndUpdate({username: req.body.chatwith}, {$addToSet: { "chats.1.pending": chat._id}}, {upsert: true, new: true}, function(err, result) {
                                             if (err) throw err;
                                             res.json(result);
-                                    }).lean();
-                                }
-                            }).lean();
-                        }
+                                        }).lean();
+                                    }
+                                }).lean();
+                            }
+                        });
                     });
+
 
                     // when users log in they will get all chats in their document.
                     // send chat and add chat to both users confirmed chats
