@@ -32,6 +32,7 @@
     "pug": "^2.0.3",
     "redis": "^2.8.0",
     "redis-rejson": "^1.0.0",
+    "s3fs": "^2.5.0",
     "socket.io": "^2.3.0",
     "universal-cookie": "^3.0.4",
     "uuid": "^3.3.2"

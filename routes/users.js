@@ -389,6 +389,7 @@ const revokefriendshipf = (req, res, next) => {
             // Standard stop being friends functionality. Determines if your own username is present in other users friends list. Puts this into "usernamepresentinconfirmedlist" function. If not true, youre not friends with the person. Do nothing. If true, stopbeingfriends() function is ran.
             User.findOne({username: req.body.thetitleofsomeoneiusedtowanttobecloseto }, {friends: 1}, function(err, result) {
                 console.log(req.body.thetitleofsomeoneiusedtowanttobecloseto, "pending? ", req.body.pending);
+                let higherpriorityran = false;
                 if (!req.body.pending) { // if pending request is not true, user is asking to revoke friendship with friend.
                     if (result.friends[0].confirmed[0]) { // Initial check if user has any friends, if true proceed
                         let listedconfirmedfriends = result.friends[0].confirmed;
@@ -409,6 +410,7 @@ const revokefriendshipf = (req, res, next) => {
                         } else {
                             console.log('a friendship revoked');
                             stopbeingfriends();
+                            higherpriorityran = true;
                         }
 
                     } else { // other user has no friends, no point in unfriending
@@ -436,7 +438,7 @@ const revokefriendshipf = (req, res, next) => {
                     if (alreadyaskedtobefriends()) {
                         console.log('friendship request cancelled');
                         removeselffrompendinglist();
-                    } else {
+                    } else if (!higherpriorityran) {
                         if (!resEnd) {
                             res.json({querystatus: 'not on other users pending list'});
                             resEnd = true;

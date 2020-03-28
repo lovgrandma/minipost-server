@@ -2,6 +2,7 @@
 
 const express = require('express');
 const fs = require('fs');
+const s3fs = require('s3fs');
 const bodyParser = require('body-parser');
 const logger = require("morgan");
 const pug = require('pug');
@@ -9,7 +10,6 @@ const mongoose = require('mongoose');
 const path = require('path');
 const session = require('express-session');
 const MongoDBStore = require('connect-mongodb-session')(session);
-
 const busboy = require('connect-busboy');
 const busboyBodyParser = require('busboy-body-parser');
 const cookieParser = require('cookie-parser');
