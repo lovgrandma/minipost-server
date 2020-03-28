@@ -405,7 +405,7 @@ const revokefriendshipf = (req, res, next) => {
                         // if present remove self from friends confirmed list and friend from selfs confirmed list.
                         if (!usernamepresentinconfirmedlist()) { // if not present in confirmed list, not friends.
                             console.log('initial friendship check');
-                            res.json({querystatus: req.body.thetitleofsomeoneiusedtowanttobecloseto + ' is not friends with you'});
+                            res.json({querystatus: req.body.thetitleofsomeoneiusedtowanttobecloseto + ' is not friends with you', querymsg: 'not friends'});
                             resEnd = true;
                         } else {
                             console.log('a friendship revoked');
@@ -507,7 +507,7 @@ const acceptfriendrequestf = (req, res, next) => {
             {new: true}, 
             function(err, result) {
                 if (err) throw err;
-                console.log('removing self from pending list');
+                console.log('removing self from other users pending list');
                 console.log(result)
             }).lean();
         }
@@ -518,7 +518,7 @@ const acceptfriendrequestf = (req, res, next) => {
             {new: true}, 
             function(err, result) {
                 if (err) throw err;
-                console.log('removing friend from pending list');
+                console.log('removing friend from your pending list');
                 console.log(result)
             }).lean();
         }

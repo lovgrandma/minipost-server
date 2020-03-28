@@ -105,6 +105,7 @@ exports = module.exports = function(io){
         });
 
         let rooms = await Promise.all(promises);
+        console.log("convos to return " + rooms);
         socket.emit("returnConvos", rooms); // emit back rooms joined
     }
 
