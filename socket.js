@@ -229,6 +229,12 @@ exports = module.exports = function(io){
             fetchConvos(socket, data);
         })
 
+        socket.on('bump', (data) => {
+            const bumpRegex = /([^]*);([^]*);([^]*);(.*)/; // regex for reading 'bump' emits
+            let room = data.match(bumpRegex)[4];
+            io.to(room).emit('bump', data);
+        })
+
         socket.on("disconnect", () => { // Should update mongodb on every disconnect
             console.log("Client disconnected");
         });
