@@ -2,7 +2,6 @@
 
 const express = require('express');
 const fs = require('fs');
-const s3fs = require('s3fs');
 const bodyParser = require('body-parser');
 const logger = require("morgan");
 const pug = require('pug');
@@ -22,7 +21,11 @@ const io = require('socket.io')(server);
 const socketRoutes = require('./socket')(io);
 
 // parse incoming requests as json and make it accessible from req body property.
-app.use(bodyParser.json());
+app.use(bodyParser.json({
+    type: function(req) {
+        return req.get('content-type').indexOf('multipart/form-data') !== 0;
+    },
+}));
 app.use(bodyParser.urlencoded({ extended: false }));
 
 // parse cookies
@@ -83,8 +86,8 @@ app.use(function (req, res, next) {
 });
 
 // Use Routes
-const users = require('./routes/users');
-app.use('/users/', users);
+const users = require('./routes/m');
+app.use('/m/', users);
 
 // The following disables caching essentially. Dont use this. 
 //app.disable('etag')

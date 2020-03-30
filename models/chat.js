@@ -23,10 +23,9 @@ const ChatSchema = new mongoose.Schema({
     }
 });
 
-// 
+// Act on entered user data if necessary before being entered into mongodb
 ChatSchema.pre('save', function(next) {
-    // this refers to the object the user created in the signup form
-    console.log(this);
+    console.log(this); // this refers to the object the user created in the signup form
     next();
 });
 
