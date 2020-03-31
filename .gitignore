@@ -1,3 +1,4 @@
 node_modules/
 config/config.js
 /uploads
+/routes/api/s3credentials.js

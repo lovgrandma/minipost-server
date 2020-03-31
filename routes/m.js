@@ -10,11 +10,11 @@ const stringify = require('json-stringify-safe');
 const fs = require('fs');
 
 // file upload
-const aws = require('aws-sdk');
+const AWS = require('aws-sdk');
 const multer = require('multer');
 const upload = multer({dest: 'uploads/'});
 const multerS3 = require('multer-s3');
-// const s3 = new aws.s3({});
+const s3 = new AWS.S3();
 
 //let upload = multer({
 //    storage: multerS3({
@@ -34,7 +34,7 @@ const Queue = require('bull');
 
 // test fs
 
-router.post('/testupload', upload.single('video'), (req, res, next) => {
+router.post('/videoupload', upload.single('video'), (req, res, next) => {
     console.log(req.file);
 //    let video = new Video({
 //        _id: uuidv4(),
