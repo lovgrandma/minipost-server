@@ -1,5 +1,7 @@
-const S3fs = require('s3fs');
 exports = module.exports = {
-    accessKeyId: 'AKIAIJ4JWZDI25UD3SSQ',
-    secretAccessKey: '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'
+    awsConfig: {
+        accessKeyId: 'AKIAIAISCYWUL6WQ5XUQ',
+        secretAccessKey: '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',
+        region:'us-east-2'
+    }
 };

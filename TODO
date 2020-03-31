@@ -264,3 +264,29 @@ let reqQueue = new Queue('request'); // Bull basic request queue.
 //myFirstQueue.on('completed', (job, result) => {
 //  console.log(`Job completed with result ${result}`);
 //})
+
+// old upload route multer
+//// test fs
+//router.post('/videoupload', (req, res, next) => {
+//    let file = req.files.video;
+//    let stream = fs.createReadStream(file.path);
+//    console.log(file);
+//    
+//    return s3fsImpl.writeFile(file.originalFilename, stream)
+//        .then(() => {
+//            fs.unlink(file.ath, (err) => {
+//                if (err) {
+//                    console.error(err);
+//                } else {
+//                    return res.json({ querystatus: req.file });
+//                }
+//            })                                               
+//        })
+//})
+
+//const key = s3Cred.accessKeyId;
+//const secret = s3Cred.secretAccessKey;
+//const s3fsImpl = new S3fs('minifs', {
+//    accessKeyId: key,
+//    secretAccessKey: secret
+//});

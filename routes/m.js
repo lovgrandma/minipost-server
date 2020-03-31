@@ -10,50 +10,57 @@ const stringify = require('json-stringify-safe');
 const fs = require('fs');
 
 // file upload
-const AWS = require('aws-sdk');
+const aws = require('aws-sdk');
+const s3Cred = require('./api/s3credentials.js');
 const multer = require('multer');
-const upload = multer({dest: 'uploads/'});
 const multerS3 = require('multer-s3');
-const s3 = new AWS.S3();
+aws.config.update(s3Cred.awsConfig);
+const s3 = new aws.S3();
 
-//let upload = multer({
-//    storage: multerS3({
-//        s3: s3,
-//        bucket: 'minifs',
-//    })
-//})
-//const S3fs = require('s3fs');
-//const multiparty = require('connect-multiparty'), // for testing file transfer, intercepts s3fs transfers
-//      multipartyMiddlewware = multiparty();
-//let s3fsImpl = require('./api/s3credentials');
+let uniqueObject = (req, file) => {
+    let uuidKey;
+    if (req.body.extension) {
+        uuidKey = uuidv4().split("-").join("") + "." + req.body.extension; // include extension in new name if valid
+    } else {
+        uuidKey = uuidv4().split("-").join("");
+    }
+    req.generatedKey = uuidKey;
+    return uuidKey;
+}
 
-//s3fsImpl.create();
-//router.use(multipartyMiddlewware);
+let upload = multer({
+    storage: multerS3({
+        s3,
+        bucket: 'minifs',
+        metadata: (req, file, next) => {
+            next(null, {fieldName: file.fieldname});
+        },
+        key : async (req, file, next) => {
+            next(null, await uniqueObject(req, file));
+        }
+    })
+})
 
-const Queue = require('bull');
+const singleUpload = upload.single('video');
+function uploadS3(req, res) {
+    console.log(req.body.extension);
+    let downloadUrl = 'https://minifs.s3.' + s3Cred.awsConfig.region + '.amazonaws.com/';
+    return new Promise((resolve, reject) => {
+        return singleUpload(req, res, err => {
+            downloadUrl += req.generatedKey;
+            if (err) {
+                return reject(err);
+            } else {
+                return resolve(downloadUrl);
+            }
+        })
+    })
+}
 
-// test fs
-
-router.post('/videoupload', upload.single('video'), (req, res, next) => {
-    console.log(req.file);
-//    let video = new Video({
-//        _id: uuidv4(),
-//
-//    })
-//    console.log('test upload route');
-//    console.log(req.files);
-//    let file = req.files.file;
-//    let rs = fs.createReadeStream(file.path);
-//    return s3fsImpl.writeFile(file.originalFilename, rs).then(() => {
-//        fs.unlink(file.path, (err) => {
-//            if (err) {
-//            console.error(err);
-//            } else {
-//                res.redirect('/profile');
-//            }
-//        });
-//    })
-    return res.json({querystatus: req.file });
+router.post('/videoupload', async (req, res, next) => {
+    let download = await uploadS3(req, res);
+    console.log(download);
+    res.status(200).send({ download: download });
 });
 
 // Login function
