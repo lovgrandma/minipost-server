@@ -8,6 +8,9 @@ const redisapp = require('../redis');
 const redisclient = redisapp.redisclient;
 const stringify = require('json-stringify-safe');
 const fs = require('fs');
+const path = require('path');
+const ffmpeg = require('ffmpeg');
+const streamifier = require('streamifier');
 
 // file upload
 const aws = require('aws-sdk');
@@ -28,6 +31,15 @@ let uniqueObject = (req, file) => {
     return uuidKey;
 }
 
+let uploadCheck = multer({
+    storage: multer.diskStorage({
+        destination: './temp/',
+        filename: function(req, file, cb) {
+            cb( null, uuidv4().split("-").join("") + "." + req.body.extension);
+        }
+    })
+});
+
 let upload = multer({
     storage: multerS3({
         s3,
@@ -41,9 +53,70 @@ let upload = multer({
     })
 })
 
-const singleUpload = upload.single('video');
+const storage = multer.memoryStorage();
+let file = multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+        return cb(null, true);
+    }
+}).any();
+upload.single('video');
+
 function uploadS3(req, res) {
-    console.log(req.body.extension);
+//    file(req, res, (err) => {
+//        if (err) {
+//            return res.status(502).json(err);
+//        }
+//        console.log("body: %j", req.body)
+//        console.log(req.files[0]);
+////        console.log(req.files[0].buffer);
+//
+//        try {
+//            // let stream = streamifier.createReadStream(req.files[0].buffer).pipe(writeStream);
+////            let buff = new Buffer(streamifier.createReadStream(req.files[0].buffer).pipe(writeStream));
+////            console.log(buff.toString());
+////            let process = new ffmpeg(streamifier.createReadStream(req.files[0].buffer).pipe(writeStream));
+////            process = Buffer.from(process);
+////            console.log()
+//            process.then(function(video) {
+//                console.log(video.metadata);
+//            }, function (err) {
+//                console.log("Error Processing: " + err);
+//            });
+//        } catch (e) {
+//            console.log("Error: " + e.msg);
+//            console.log("Error: " + e.code);
+//        }
+//    })
+
+//    console.log(uploadFile);
+//    console.log(req.files);
+    // let data = fs.createReadStream(req.files.)
+//    console.log("Extension " + req.body.extension);
+//    console.log(req.body);
+//    console.log(req.file);
+//    console.log("Data " + req.data);
+
+
+    /* 1) Check video file to ensure that file is viable for encoding
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    */
+
     let downloadUrl = 'https://minifs.s3.' + s3Cred.awsConfig.region + '.amazonaws.com/';
     return new Promise((resolve, reject) => {
         return singleUpload(req, res, err => {
@@ -57,10 +130,31 @@ function uploadS3(req, res) {
     })
 }
 
-router.post('/videoupload', async (req, res, next) => {
-    let download = await uploadS3(req, res);
-    console.log(download);
-    res.status(200).send({ download: download });
+router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
+    try {
+        let fileInfo = path.parse(req.file.filename);
+        let videoPath = './temp/' + fileInfo.name + fileInfo.ext;
+        console.log(videoPath);
+        try {
+            let process = new ffmpeg (videoPath);
+            process.then(function (video) {
+                console.log(video.metadata);
+                console.log(video.info_configuration);
+            }, function (err) {
+                console.log('Error processing: ' + err);
+            });
+        } catch (e) {
+            console.log(e);
+        }
+    } catch (e) {
+        console.log(e);
+    }
+    //let tempPath = path.parse(req.files[0]);
+    // console.log(tempPath);
+//    let download = await uploadS3(req, res);
+//    console.log("Download " + download);
+//    res.status(200).send({ download: download });
+    res.status(200).send({ download: "asdadsa" });
 });
 
 // Login function

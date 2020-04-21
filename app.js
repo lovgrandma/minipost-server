@@ -27,7 +27,6 @@ app.use(bodyParser.json({
     },
 }));
 app.use(bodyParser.urlencoded({ extended: false }));
-
 // parse cookies
 app.use(cookieParser('small car big wheels'));
 

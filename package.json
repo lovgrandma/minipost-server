@@ -25,6 +25,7 @@
     "express": "^4.16.3",
     "express-session": "^1.15.6",
     "express-validator": "^5.2.0",
+    "ffmpeg": "0.0.4",
     "fs": "0.0.1-security",
     "json-stringify-safe": "^5.0.1",
     "mongoose": "^5.1.2",
@@ -38,6 +39,7 @@
     "redis-rejson": "^1.0.0",
     "s3fs": "^2.5.0",
     "socket.io": "^2.3.0",
+    "streamifier": "^0.1.1",
     "universal-cookie": "^3.0.4",
     "uuid": "^3.3.2"
   }
