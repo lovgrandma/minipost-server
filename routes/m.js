@@ -20,6 +20,9 @@ const multerS3 = require('multer-s3');
 aws.config.update(s3Cred.awsConfig);
 const s3 = new aws.S3();
 
+// Resolutions for video conversion
+const resolutions = [ 2160, 1440, 1080, 720, 480, 360 ];
+
 let uniqueObject = (req, file) => {
     let uuidKey;
     if (req.body.extension) {
@@ -60,7 +63,7 @@ let file = multer({
         return cb(null, true);
     }
 }).any();
-upload.single('video');
+let singleUpload = upload.single('video');
 
 function uploadS3(req, res) {
     let downloadUrl = 'https://minifs.s3.' + s3Cred.awsConfig.region + '.amazonaws.com/';
@@ -76,12 +79,48 @@ function uploadS3(req, res) {
     })
 }
 
+let videoUrls = [];
+
+const convertRecursively = function(i, videoPath) {
+    if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions
+        try {
+            let process = new ffmpeg(videoPath);
+            console.log(videoPath);
+            process.then(function (video) {
+                let tempUuid = uuidv4().split("-").join("");
+                console.log(resolutions[i]);
+                video.setVideoSize(resolutions[i] + "x?", true, true).setAudioChannels(2);
+                video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
+                video.save('./temp/' + tempUuid + resolutions[i] + ".mp4", function (err, file) {
+                    if (!err) {
+                        console.log('Video file: ' + file);
+                        let videoObj = {
+                                "videoPath" : './temp/' + tempUuid + ".mp4",
+                                "resolution" : resolutions[i]
+                            }
+                        videoUrls.push(videoObj);
+                        console.log(videoUrls);
+                        convertRecursively(i+1, videoPath);
+                    } else {
+                        console.log(err);
+                    }
+                });
+            });
+        } catch (e) {
+            console.log("Error code: " + e.code);
+            console.log("Error msg: " + e.msg);
+        }
+    }
+}
+
 router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
-    // 1) Check video file to ensure that file is viable for encoding
+    // 1) Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file
+    // Uses path to determine if viable for ffmpeg conversion
+
     try {
         let fileInfo = path.parse(req.file.filename);
         let videoPath = './temp/' + fileInfo.name + fileInfo.ext;
-        console.log(videoPath);
+        console.log("Path: " + videoPath);
         try {
             let process = new ffmpeg (videoPath);
             process.then(function (video) {
@@ -89,7 +128,36 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                 console.log(video.metadata.video);
                 console.log(video.metadata.audio);
                 console.log(video.metadata.duration);
-                console.log(video.metadata.video.resolution.w);
+                // Video resolution, example 1080p
+                let resolution = video.metadata.video.resolution.w;
+                let container = video.metadata.video.container.toLowerCase();
+                if (container == "mov" || container == "3gpp" || container == "avi" || container == "flv" || container == "mp4"
+                   || container == "webm" || container == "wmv") {
+                    // Determine what resolution to downgrade to
+                    if (resolution > 360) {
+                        let ranOnce = false;
+                        for (let i = 0; i < resolutions.length; i++) {
+                            // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
+                            console.log(resolution + " + " + resolutions[i]);
+                            if (resolution == resolutions[i]) { // Convert at current resolution if match
+                                ranOnce = true;
+                                convertRecursively(i, videoPath);
+                                break;
+                            } else if (resolution > resolutions[i]) { // Find next lower supported resolution and convert
+                                ranOnce = true;
+                                convertRecursively(i+1, videoPath);
+                                break;
+                            }
+                        };
+                        if (!ranOnce) {
+                            res.status(200).send({ querystatus: "Bad Resolution" });
+                        }
+                    } else {
+                        res.status(200).send({ querystatus: "Bad Resolution" });
+                    }
+                } else {
+                     res.status(200).send({ querystatus: "Invalid video container" });
+                }
                 // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
                 // Upload converted video to s3, save s3 path in temporary object for mongo
                 // 2160p, 1440p, 1080p, 720p, 480p, 360p
@@ -103,11 +171,15 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
         console.log(e);
     }
 
-//    let download = await uploadS3(req, res);
-//    console.log("Download " + download);
-//    res.status(200).send({ download: download });
+    //let download = await uploadS3(req, res);
+    //console.log("Download " + download);
+    //res.status(200).send({ download: download });
+    videoUrls = [];
     res.status(200).send({ download: "asdadsa" });
 });
+
+// End of download functionality
+/**************************************************************************************/
 
 // Login function
 const loginfunc = (req, res, next) => {
