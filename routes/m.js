@@ -63,60 +63,6 @@ let file = multer({
 upload.single('video');
 
 function uploadS3(req, res) {
-//    file(req, res, (err) => {
-//        if (err) {
-//            return res.status(502).json(err);
-//        }
-//        console.log("body: %j", req.body)
-//        console.log(req.files[0]);
-////        console.log(req.files[0].buffer);
-//
-//        try {
-//            // let stream = streamifier.createReadStream(req.files[0].buffer).pipe(writeStream);
-////            let buff = new Buffer(streamifier.createReadStream(req.files[0].buffer).pipe(writeStream));
-////            console.log(buff.toString());
-////            let process = new ffmpeg(streamifier.createReadStream(req.files[0].buffer).pipe(writeStream));
-////            process = Buffer.from(process);
-////            console.log()
-//            process.then(function(video) {
-//                console.log(video.metadata);
-//            }, function (err) {
-//                console.log("Error Processing: " + err);
-//            });
-//        } catch (e) {
-//            console.log("Error: " + e.msg);
-//            console.log("Error: " + e.code);
-//        }
-//    })
-
-//    console.log(uploadFile);
-//    console.log(req.files);
-    // let data = fs.createReadStream(req.files.)
-//    console.log("Extension " + req.body.extension);
-//    console.log(req.body);
-//    console.log(req.file);
-//    console.log("Data " + req.data);
-
-
-    /* 1) Check video file to ensure that file is viable for encoding
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    */
-
     let downloadUrl = 'https://minifs.s3.' + s3Cred.awsConfig.region + '.amazonaws.com/';
     return new Promise((resolve, reject) => {
         return singleUpload(req, res, err => {
@@ -131,6 +77,7 @@ function uploadS3(req, res) {
 }
 
 router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
+    // 1) Check video file to ensure that file is viable for encoding
     try {
         let fileInfo = path.parse(req.file.filename);
         let videoPath = './temp/' + fileInfo.name + fileInfo.ext;
@@ -138,8 +85,14 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
         try {
             let process = new ffmpeg (videoPath);
             process.then(function (video) {
-                console.log(video.metadata);
-                console.log(video.info_configuration);
+                // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type .. also delete temporary video
+                console.log(video.metadata.video);
+                console.log(video.metadata.audio);
+                console.log(video.metadata.duration);
+                console.log(video.metadata.video.resolution.w);
+                // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
+                // Upload converted video to s3, save s3 path in temporary object for mongo
+                // 2160p, 1440p, 1080p, 720p, 480p, 360p
             }, function (err) {
                 console.log('Error processing: ' + err);
             });
@@ -149,8 +102,7 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
     } catch (e) {
         console.log(e);
     }
-    //let tempPath = path.parse(req.files[0]);
-    // console.log(tempPath);
+
 //    let download = await uploadS3(req, res);
 //    console.log("Download " + download);
 //    res.status(200).send({ download: download });
