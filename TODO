@@ -290,3 +290,36 @@ let reqQueue = new Queue('request'); // Bull basic request queue.
 //    accessKeyId: key,
 //    secretAccessKey: secret
 //});
+
+let upload = multer({
+    storage: multerS3({
+        s3,
+        bucket: 'minifs',
+        metadata: (req, file, next) => {
+            next(null, {fieldName: file.fieldname});
+        },
+        key : async (req, file, next) => {
+            next(null, await uniqueObject(req, file));
+        }
+    })
+})
+
+let uniqueObject = (req, file) => {
+    let uniqueKey = false;
+    let uuidKey;
+    do {
+        uuidKey = uuidv4().split("-").join("") + "." + req.body.extension;
+        s3.getObject({ Bucket: "minifs", Key: "", Range: "bytes=0-9" }, function(err, data) {
+            if (err) {
+                console.log(err, err.stack);
+                console.log("Good if no object was found");
+                uniqueKey = true;
+            } else {
+                console.log(data);
+                console.log ("Bad, already found a match for uuid");
+            }
+        })
+    } while (!uniqueKey);
+    req.generatedKey = uuidKey;
+    return uuidKey;
+}

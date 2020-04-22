@@ -24,33 +24,6 @@ const s3 = new aws.S3();
 // Resolutions for video conversion
 const resolutions = [ 2160, 1440, 1080, 720, 480, 360 ];
 
-let uniqueObject = (req, file) => {
-    let uniqueKey = false;
-    let uuidKey;
-    do {
-        uuidKey = uuidv4().split("-").join("") + "." + req.body.extension;
-        s3.getObject({ Bucket: "minifs", Key: "", Range: "bytes=0-9" }, function(err, data) {
-            if (err) {
-                console.log(err, err.stack);
-                console.log("Good if no object was found");
-                uniqueKey = true;
-            } else {
-                console.log(data);
-                console.log ("Bad, already found a match for uuid");
-            }
-        })
-    } while (!uniqueKey);
-
-
-//    if (req.body.extension) {
-//        uuidKey = uuidKey.split("-").join("") + "." + req.body.extension; // include extension in new name if valid
-//    } else {
-//        uuidKey = uuidKey.split("-").join("");
-//    }
-    req.generatedKey = uuidKey;
-    return uuidKey;
-}
-
 let uploadCheck = multer({
     storage: multer.diskStorage({
         destination: './temp/',
@@ -60,19 +33,6 @@ let uploadCheck = multer({
     })
 });
 
-let upload = multer({
-    storage: multerS3({
-        s3,
-        bucket: 'minifs',
-        metadata: (req, file, next) => {
-            next(null, {fieldName: file.fieldname});
-        },
-        key : async (req, file, next) => {
-            next(null, await uniqueObject(req, file));
-        }
-    })
-})
-
 const storage = multer.memoryStorage();
 let file = multer({
     storage,
@@ -80,7 +40,6 @@ let file = multer({
         return cb(null, true);
     }
 }).any();
-let singleUpload = upload.single('video');
 
 function uploadS3(req, res) {
     let downloadUrl = 'https://minifs.s3.' + s3Cred.awsConfig.region + '.amazonaws.com/';
@@ -100,25 +59,27 @@ const uploadAmazonObjects = async function(videoUrls, req, res) {
     if (videoUrls.length == 0) {
         res.status(200).send({ querystatus: "Something went wrong" });
     }
-    console.log("Upload Amazon Objects");
+    console.log("Uploading Amazon Objects");
     console.log(videoUrls);
     let keyRegex = /([a-z]*[0-9].*)/;
+    let uploadMethod;
     for (let i = 0; i < videoUrls.length; i++) {
         console.log("Uploading " + videoUrls[i].videoPath + " to s3");
         let data = fs.createReadStream(videoUrls[i].videoPath);
-        let uploadPromise = s3.upload({ Bucket: 'minifs', Key: videoUrls[i].videoPath.match(keyRegex)[0], Body: data }).promise();
-        uploadPromise.then(function(data) {
-            console.log(data);
-            if (i == videoUrls.length-1) {
-                res.status(200).send({ querystatus: "Upload to S3 Complete" });
+        uploadMethod = await s3.upload({ Bucket: 'minifs', Key: videoUrls[i].videoPath.match(keyRegex)[0], Body: data }).promise();
+        if (await uploadMethod) {
+            console.log(uploadMethod);
+            if (data) {
+                if (i == videoUrls.length-1) {
+                    console.log("Upload to S3 Complete");
+                    res.status(200).send({ querystatus: "Upload to S3 Complete" });
+                }
             }
-        }).catch(function(err) {
-            console.log(err);
-        })
-    };
-}
+        };
+    }
+};
 
-const convertRecursively = async function(i, videoPath, videoUrls, generatedUuid, req, res) {
+const convertVideos = async function(i, videoPath, videoUrls, generatedUuid, req, res) {
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions
         try {
             console.log("Generated UUID: " + generatedUuid + "-" + resolutions[i] + ".mp4");
@@ -135,7 +96,7 @@ const convertRecursively = async function(i, videoPath, videoUrls, generatedUuid
                                 "resolution" : resolutions[i]
                             };
                         videoUrls.push(videoObj);
-                        convertRecursivelyPromise(i+1, videoPath, videoUrls, generatedUuid, req, res);
+                        convertVideos(i+1, videoPath, videoUrls, generatedUuid, req, res);
                     } else {
                         console.log(err);
                         return err;
@@ -148,13 +109,11 @@ const convertRecursively = async function(i, videoPath, videoUrls, generatedUuid
             return e;
         }
     } else {
-        console.log("Finished");
+        console.log("Finished converting videos");
         uploadAmazonObjects(await videoUrls, req, res);
     }
     return videoUrls;
 }
-
-const convertRecursivelyPromise = util.promisify(convertRecursively);
 
 router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
     // 1) Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file. Uses path to determine if viable for ffmpeg conversion
@@ -179,6 +138,7 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                 if (resolution > 360) {
                     let ranOnce = false;
                     let l = 0;
+                    // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos()
                     function createUniqueUuid() {
                         let generatedUuid = uuidv4().split("-").join("");
                         let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-360.mp4", Range: "bytes=0-9" }).promise();
@@ -200,14 +160,12 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                                 if (resolution == resolutions[i]) { // Convert at current resolution if match
                                     ranOnce = true;
                                     console.log(videoPath);
-                                    videoUrls = await convertRecursivelyPromise(i, videoPath, videoUrls, generatedUuid, req, res);
-                                    console.log("Check " + videoUrls);
+                                    videoUrls = await convertVideos(i, videoPath, videoUrls, generatedUuid, req, res);
                                     return videoUrls;
                                 } else if (resolution > resolutions[i]) { // Find next lower supported resolution and convert
                                     ranOnce = true;
                                     console.log(videoPath);
-                                    videoUrls = await convertRecursivelyPromise(i+1, videoPath, videoUrls, generatedUuid, req, res);
-                                    console.log("Check " + videoUrls);
+                                    videoUrls = await convertVideos(i+1, videoPath, videoUrls, generatedUuid, req, res);
                                     return videoUrls;
                                 }
                             };
@@ -215,7 +173,6 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                         })
                     };
                     createUniqueUuid();
-
                 } else {
                     res.status(500).send({ querystatus: "Bad Resolution" });
                 }
