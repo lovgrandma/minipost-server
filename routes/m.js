@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const util = require('util');
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
@@ -24,12 +25,28 @@ const s3 = new aws.S3();
 const resolutions = [ 2160, 1440, 1080, 720, 480, 360 ];
 
 let uniqueObject = (req, file) => {
+    let uniqueKey = false;
     let uuidKey;
-    if (req.body.extension) {
-        uuidKey = uuidv4().split("-").join("") + "." + req.body.extension; // include extension in new name if valid
-    } else {
-        uuidKey = uuidv4().split("-").join("");
-    }
+    do {
+        uuidKey = uuidv4().split("-").join("") + "." + req.body.extension;
+        s3.getObject({ Bucket: "minifs", Key: "", Range: "bytes=0-9" }, function(err, data) {
+            if (err) {
+                console.log(err, err.stack);
+                console.log("Good if no object was found");
+                uniqueKey = true;
+            } else {
+                console.log(data);
+                console.log ("Bad, already found a match for uuid");
+            }
+        })
+    } while (!uniqueKey);
+
+
+//    if (req.body.extension) {
+//        uuidKey = uuidKey.split("-").join("") + "." + req.body.extension; // include extension in new name if valid
+//    } else {
+//        uuidKey = uuidKey.split("-").join("");
+//    }
     req.generatedKey = uuidKey;
     return uuidKey;
 }
@@ -79,103 +96,165 @@ function uploadS3(req, res) {
     })
 }
 
-let videoUrls = [];
+const uploadAmazonObjects = async function(videoUrls, req, res) {
+    if (videoUrls.length == 0) {
+        res.status(200).send({ querystatus: "Something went wrong" });
+    }
+    console.log("Upload Amazon Objects");
+    console.log(videoUrls);
+    let keyRegex = /([a-z]*[0-9].*)/;
+    for (let i = 0; i < videoUrls.length; i++) {
+        console.log("Uploading " + videoUrls[i].videoPath + " to s3");
+        let data = fs.createReadStream(videoUrls[i].videoPath);
+        let uploadPromise = s3.upload({ Bucket: 'minifs', Key: videoUrls[i].videoPath.match(keyRegex)[0], Body: data }).promise();
+        uploadPromise.then(function(data) {
+            console.log(data);
+            if (i == videoUrls.length-1) {
+                res.status(200).send({ querystatus: "Upload to S3 Complete" });
+            }
+        }).catch(function(err) {
+            console.log(err);
+        })
+    };
+}
 
-const convertRecursively = function(i, videoPath) {
+const convertRecursively = async function(i, videoPath, videoUrls, generatedUuid, req, res) {
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions
         try {
+            console.log("Generated UUID: " + generatedUuid + "-" + resolutions[i] + ".mp4");
             let process = new ffmpeg(videoPath);
-            console.log(videoPath);
-            process.then(function (video) {
-                let tempUuid = uuidv4().split("-").join("");
+            process.then(async function (video) {
                 console.log(resolutions[i]);
                 video.setVideoSize(resolutions[i] + "x?", true, true).setAudioChannels(2);
                 video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
-                video.save('./temp/' + tempUuid + resolutions[i] + ".mp4", function (err, file) {
+                video.save('./temp/' + generatedUuid + "-" + resolutions[i] + ".mp4", async function (err, file) {
                     if (!err) {
                         console.log('Video file: ' + file);
                         let videoObj = {
-                                "videoPath" : './temp/' + tempUuid + ".mp4",
+                                "videoPath" : './temp/' + generatedUuid + "-" + resolutions[i] + ".mp4",
                                 "resolution" : resolutions[i]
-                            }
+                            };
                         videoUrls.push(videoObj);
-                        console.log(videoUrls);
-                        convertRecursively(i+1, videoPath);
+                        convertRecursivelyPromise(i+1, videoPath, videoUrls, generatedUuid, req, res);
                     } else {
                         console.log(err);
+                        return err;
                     }
                 });
             });
         } catch (e) {
             console.log("Error code: " + e.code);
             console.log("Error msg: " + e.msg);
+            return e;
         }
+    } else {
+        console.log("Finished");
+        uploadAmazonObjects(await videoUrls, req, res);
     }
+    return videoUrls;
 }
 
-router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
-    // 1) Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file
-    // Uses path to determine if viable for ffmpeg conversion
+const convertRecursivelyPromise = util.promisify(convertRecursively);
 
+router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
+    // 1) Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file. Uses path to determine if viable for ffmpeg conversion
+    let videoUrls = [];
     try {
         let fileInfo = path.parse(req.file.filename);
         let videoPath = './temp/' + fileInfo.name + fileInfo.ext;
         console.log("Path: " + videoPath);
-        try {
-            let process = new ffmpeg (videoPath);
-            process.then(function (video) {
-                // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type .. also delete temporary video
-                console.log(video.metadata.video);
-                console.log(video.metadata.audio);
-                console.log(video.metadata.duration);
-                // Video resolution, example 1080p
-                let resolution = video.metadata.video.resolution.w;
-                let container = video.metadata.video.container.toLowerCase();
-                if (container == "mov" || container == "3gpp" || container == "avi" || container == "flv" || container == "mp4"
-                   || container == "webm" || container == "wmv") {
-                    // Determine what resolution to downgrade to
-                    if (resolution > 360) {
-                        let ranOnce = false;
-                        for (let i = 0; i < resolutions.length; i++) {
-                            // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
-                            console.log(resolution + " + " + resolutions[i]);
-                            if (resolution == resolutions[i]) { // Convert at current resolution if match
-                                ranOnce = true;
-                                convertRecursively(i, videoPath);
-                                break;
-                            } else if (resolution > resolutions[i]) { // Find next lower supported resolution and convert
-                                ranOnce = true;
-                                convertRecursively(i+1, videoPath);
-                                break;
-                            }
-                        };
-                        if (!ranOnce) {
-                            res.status(200).send({ querystatus: "Bad Resolution" });
-                        }
-                    } else {
-                        res.status(200).send({ querystatus: "Bad Resolution" });
-                    }
-                } else {
-                     res.status(200).send({ querystatus: "Invalid video container" });
-                }
+        let process = new ffmpeg(videoPath);
+        process.then(async function (video) {
+            // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type .. also delete temporary video
+            console.log(video.metadata.video);
+            console.log(video.metadata.audio);
+            console.log(video.metadata.duration);
+            // Video resolution, example 1080p
+            let resolution = video.metadata.video.resolution.w;
+            let container = video.metadata.video.container.toLowerCase();
+            if (container == "mov" || container == "3gpp" || container == "avi" || container == "flv" || container == "mp4"
+                || container == "webm" || container == "wmv") {
                 // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
-                // Upload converted video to s3, save s3 path in temporary object for mongo
-                // 2160p, 1440p, 1080p, 720p, 480p, 360p
-            }, function (err) {
-                console.log('Error processing: ' + err);
-            });
-        } catch (e) {
-            console.log(e);
-        }
+                // Determine what resolution to downgrade to
+                if (resolution > 360) {
+                    let ranOnce = false;
+                    let l = 0;
+                    function createUniqueUuid() {
+                        let generatedUuid = uuidv4().split("-").join("");
+                        let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-360.mp4", Range: "bytes=0-9" }).promise();
+                        checkExistingObject.then(async (data, err) => {
+                            if (data) { // If data was found, generated uuid is not unique. Max 3 tries
+                                console.log(data);
+                                l++;
+                                if (l < 3) {
+                                    return createUniqueUuid();
+                                } else {
+                                    res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
+                                }
+                            }
+                        }).catch(async error => {
+                            console.log(error);
+                            console.log("No data found");
+                            for (let i = 0; i < resolutions.length; i++) {
+                                // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
+                                console.log(resolution + " + " + resolutions[i]);
+                                if (resolution == resolutions[i]) { // Convert at current resolution if match
+                                    ranOnce = true;
+                                    console.log(videoPath);
+                                    videoUrls = await convertRecursivelyPromise(i, videoPath, videoUrls, generatedUuid, req, res);
+                                    console.log("Check " + videoUrls);
+                                    return videoUrls;
+                                } else if (resolution > resolutions[i]) { // Find next lower supported resolution and convert
+                                    ranOnce = true;
+                                    console.log(videoPath);
+                                    videoUrls = await convertRecursivelyPromise(i+1, videoPath, videoUrls, generatedUuid, req, res);
+                                    console.log("Check " + videoUrls);
+                                    return videoUrls;
+                                }
+                            };
+                            if (!ranOnce) res.status(500).send({ querystatus: "Bad Resolution" });
+                        })
+                    };
+                    createUniqueUuid();
+
+                } else {
+                    res.status(500).send({ querystatus: "Bad Resolution" });
+                }
+            } else {
+                res.status(500).send({ querystatus: "Invalid video container" });
+            }
+            return videoUrls;
+        }).catch(error => {
+            console.log(error);
+        });
     } catch (e) {
         console.log(e);
     }
+    // Upload converted videos to s3, save s3 path in temporary object for mongo Dash
+    // https://docs.aws.amazon.com/AmazonS3/latest/dev/uploadobjusingmpu.html For more on multipart uploads
 
-    //let download = await uploadS3(req, res);
-    //console.log("Download " + download);
-    //res.status(200).send({ download: download });
-    videoUrls = [];
-    res.status(200).send({ download: "asdadsa" });
+    // Regex for matching object name ([a-z]*[0-9].*) e.g ./temp/2029d09203kd848352dk1.mp4
+//    let keyRegex = /([a-z]*[0-9].*)/;
+//    promise.then(function(videoUrls) {
+//        console.log("Video conversion completed, running upload block");
+//        console.log(videoUrls);
+//        if (videoUrls.length == 0) {
+//            res.status(200).send({ querystatus: "Something went wrong"});
+//        }
+//        for (let i = 0; i < videoUrls.length; i++) {
+//            console.log("Uploading " + videoUrls[i].videoPath + " to s3");
+//            let data = fs.createReadStream(videoUrls[i].videoPath);
+//            s3.upload({ Bucket: 'minfs', Key: videoUrls[i].match(keyRegex)[0], Body: data }, function(err, data) {
+//                console.log(err, data);
+//            });
+//        };
+//    }).then(function() {
+//        //let download = await uploadS3(req, res);
+//        //console.log("Download " + download);
+//        //res.status(200).send({ download: download });
+//        videoUrls = [];
+//        res.status(200).send({ download: "asdadsa" });
+//    });
 });
 
 // End of download functionality

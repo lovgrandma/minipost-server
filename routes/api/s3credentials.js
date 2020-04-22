@@ -1,7 +1,7 @@
 exports = module.exports = {
     awsConfig: {
-        accessKeyId: 'AKIAIAISCYWUL6WQ5XUQ',
-        secretAccessKey: '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',
+        accessKeyId: 'AKIAIJRUBF7NUPMJ54DQ',
+        secretAccessKey: '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',
         region:'us-east-2'
     }
 };
