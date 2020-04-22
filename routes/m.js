@@ -193,8 +193,7 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                                 }
                             }
                         }).catch(async error => {
-                            console.log(error);
-                            console.log("No data found");
+                            console.log("No data found at generatedUUID, processing");
                             for (let i = 0; i < resolutions.length; i++) {
                                 // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
                                 console.log(resolution + " + " + resolutions[i]);
