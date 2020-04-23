@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const util = require('util');
+const cp = require('child_process');
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
@@ -13,6 +14,7 @@ const path = require('path');
 const ffmpeg = require('ffmpeg');
 const streamifier = require('streamifier');
 
+
 // file upload
 const aws = require('aws-sdk');
 const s3Cred = require('./api/s3credentials.js');
@@ -22,7 +24,8 @@ aws.config.update(s3Cred.awsConfig);
 const s3 = new aws.S3();
 
 // Resolutions for video conversion
-const resolutions = [ 2160, 1440, 1080, 720, 480, 360 ];
+const resolutions = [ 2048, 1440, 1080, 720, 480, 360 ];
+Object.freeze(resolutions);
 
 let uploadCheck = multer({
     storage: multer.diskStorage({
@@ -55,22 +58,35 @@ function uploadS3(req, res) {
     })
 }
 
+const makeMpd = async function(videoUrls, req, res) {
+
+    res.status(200).send({ querystatus: "Testing cp process & mpd generation" });
+}
+/* Uploads individual amazon objects in videoUrls array to amazon
+*/
 const uploadAmazonObjects = async function(videoUrls, req, res) {
+    // The locations array will hold the location of the file once uploaded and "detail"
+    // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
+    // Use the locations array to build the dash mpd file
+    let locations = [];
     if (videoUrls.length == 0) {
         res.status(200).send({ querystatus: "Something went wrong" });
     }
     console.log("Uploading Amazon Objects");
     console.log(videoUrls);
     let keyRegex = /([a-z]*[0-9].*)/;
-    let uploadMethod;
+    let resoRegex = /-([0-9)]*)/
+    let uploadData;
     for (let i = 0; i < videoUrls.length; i++) {
-        console.log("Uploading " + videoUrls[i].videoPath + " to s3");
-        let data = fs.createReadStream(videoUrls[i].videoPath);
-        uploadMethod = await s3.upload({ Bucket: 'minifs', Key: videoUrls[i].videoPath.match(keyRegex)[0], Body: data }).promise();
-        if (await uploadMethod) {
-            console.log(uploadMethod);
+        console.log("Uploading " + videoUrls[i].videopath + " to s3");
+        let data = fs.createReadStream(videoUrls[i].videopath);
+        uploadData = await s3.upload({ Bucket: 'minifs', Key: videoUrls[i].videopath.match(keyRegex)[0], Body: data }).promise();
+        if (await uploadData) {
+            locations.push({location: uploadData.Location, detail: uploadData.Key.match(resoRegex)[1]});
+            console.log(uploadData);
             if (data) {
                 if (i == videoUrls.length-1) {
+                    console.log(locations);
                     console.log("Upload to S3 Complete");
                     res.status(200).send({ querystatus: "Upload to S3 Complete" });
                 }
@@ -79,24 +95,24 @@ const uploadAmazonObjects = async function(videoUrls, req, res) {
     }
 };
 
-const convertVideos = async function(i, videoPath, videoUrls, generatedUuid, req, res) {
+const convertVideos = async function(i, originalVideo, videoUrls, generatedUuid, req, res) {
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions
         try {
-            console.log("Generated UUID: " + generatedUuid + "-" + resolutions[i] + ".mp4");
-            let process = new ffmpeg(videoPath);
+            console.log(resolutions[i]);
+            console.log("Generated UUID: " + generatedUuid + "-" + resolutions[i]);
+            let process = new ffmpeg(originalVideo);
             process.then(async function (video) {
-                console.log(resolutions[i]);
                 video.setVideoSize(resolutions[i] + "x?", true, true).setAudioChannels(2);
                 video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
                 video.save('./temp/' + generatedUuid + "-" + resolutions[i] + ".mp4", async function (err, file) {
                     if (!err) {
                         console.log('Video file: ' + file);
                         let videoObj = {
-                                "videoPath" : './temp/' + generatedUuid + "-" + resolutions[i] + ".mp4",
+                                "videopath" : './temp/' + generatedUuid + "-" + resolutions[i] + ".mp4",
                                 "resolution" : resolutions[i]
                             };
                         videoUrls.push(videoObj);
-                        convertVideos(i+1, videoPath, videoUrls, generatedUuid, req, res);
+                        convertVideos(i+1, originalVideo, videoUrls, generatedUuid, req, res);
                     } else {
                         console.log(err);
                         return err;
@@ -111,6 +127,7 @@ const convertVideos = async function(i, videoPath, videoUrls, generatedUuid, req
     } else {
         console.log("Finished converting videos");
         uploadAmazonObjects(await videoUrls, req, res);
+        //makeMpd(await videoUrls, originalVideo, req, res);
     }
     return videoUrls;
 }
@@ -120,9 +137,9 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
     let videoUrls = [];
     try {
         let fileInfo = path.parse(req.file.filename);
-        let videoPath = './temp/' + fileInfo.name + fileInfo.ext;
-        console.log("Path: " + videoPath);
-        let process = new ffmpeg(videoPath);
+        let originalVideo = './temp/' + fileInfo.name + fileInfo.ext;
+        console.log("Original path: " + originalVideo);
+        let process = new ffmpeg(originalVideo);
         process.then(async function (video) {
             // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type .. also delete temporary video
             console.log(video.metadata.video);
@@ -143,29 +160,29 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                         let generatedUuid = uuidv4().split("-").join("");
                         let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-360.mp4", Range: "bytes=0-9" }).promise();
                         checkExistingObject.then(async (data, err) => {
+                            l++;
                             if (data) { // If data was found, generated uuid is not unique. Max 3 tries
                                 console.log(data);
-                                l++;
                                 if (l < 3) {
                                     return createUniqueUuid();
                                 } else {
                                     res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
                                 }
+                            } else {
+                                res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
                             }
                         }).catch(async error => {
-                            console.log("No data found at generatedUUID, processing");
+                            console.log("No data found with generatedUUID on object storage, processing");
                             for (let i = 0; i < resolutions.length; i++) {
                                 // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
-                                console.log(resolution + " + " + resolutions[i]);
+                                console.log("Resolution " + resolution + " >= " + resolutions[i] + " ?");
                                 if (resolution == resolutions[i]) { // Convert at current resolution if match
                                     ranOnce = true;
-                                    console.log(videoPath);
-                                    videoUrls = await convertVideos(i, videoPath, videoUrls, generatedUuid, req, res);
+                                    videoUrls = await convertVideos(i, originalVideo, videoUrls, generatedUuid, req, res);
                                     return videoUrls;
-                                } else if (resolution > resolutions[i]) { // Find next lower supported resolution and convert
+                                } else if (resolution > resolutions[i]) { // Find next lower supported resolution and convert, e.g if resolution size is 2560p, convert at 2048p and lower
                                     ranOnce = true;
-                                    console.log(videoPath);
-                                    videoUrls = await convertVideos(i+1, videoPath, videoUrls, generatedUuid, req, res);
+                                    videoUrls = await convertVideos(i+1, originalVideo, videoUrls, generatedUuid, req, res);
                                     return videoUrls;
                                 }
                             };
@@ -186,31 +203,6 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
     } catch (e) {
         console.log(e);
     }
-    // Upload converted videos to s3, save s3 path in temporary object for mongo Dash
-    // https://docs.aws.amazon.com/AmazonS3/latest/dev/uploadobjusingmpu.html For more on multipart uploads
-
-    // Regex for matching object name ([a-z]*[0-9].*) e.g ./temp/2029d09203kd848352dk1.mp4
-//    let keyRegex = /([a-z]*[0-9].*)/;
-//    promise.then(function(videoUrls) {
-//        console.log("Video conversion completed, running upload block");
-//        console.log(videoUrls);
-//        if (videoUrls.length == 0) {
-//            res.status(200).send({ querystatus: "Something went wrong"});
-//        }
-//        for (let i = 0; i < videoUrls.length; i++) {
-//            console.log("Uploading " + videoUrls[i].videoPath + " to s3");
-//            let data = fs.createReadStream(videoUrls[i].videoPath);
-//            s3.upload({ Bucket: 'minfs', Key: videoUrls[i].match(keyRegex)[0], Body: data }, function(err, data) {
-//                console.log(err, data);
-//            });
-//        };
-//    }).then(function() {
-//        //let download = await uploadS3(req, res);
-//        //console.log("Download " + download);
-//        //res.status(200).send({ download: download });
-//        videoUrls = [];
-//        res.status(200).send({ download: "asdadsa" });
-//    });
 });
 
 // End of download functionality

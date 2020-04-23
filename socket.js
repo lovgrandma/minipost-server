@@ -18,6 +18,7 @@ exports = module.exports = function(io){
     // Test method to test if socket is successfully speaking with client
     let socket;
 
+    // Updates typing data and emits typing to room. Typing only updates if username != user that sent message
     let updateType = (socket, data) => {
         let promise = new Promise(function(resolve, reject) {
             let decom = lzw.decompress(data); // decompress data to check which room to send to.
@@ -62,14 +63,13 @@ exports = module.exports = function(io){
                 // Will only fire once as this fires when a user sends a chat. If the chat length at that time of updates' remainder of X amount is 0, then update mongo. Copies whole redis log, does not push.
                 if (await Chat.findOne({_id: data.id}).lean()) {
                     Chat.findOneAndUpdate({_id: temp._id }, {"log": temp.log}, { new: true }, function(err, result) {
-                        console.log("Updated");
+                        console.log("Updated Mongo Chat");
                     });
                 }
             }
             chatinfo.id = data.id;
             io.to(data.id).emit('chat', chatinfo); // Send small chats back instead of entire chat object
         }
-
         getChat(data);
     }
 
@@ -129,7 +129,6 @@ exports = module.exports = function(io){
             })
             joinRoom.then(() => {
                 console.log(socket.rooms); // The socket id creates a default room and adds the room to the object list
-                let objIterate = 0;
                 let result = Object.keys(socket.rooms).map(function(key) {
                     return socket.rooms[key];
                 });
@@ -145,7 +144,6 @@ exports = module.exports = function(io){
             let mongoConvos = await User.findOne({username: user }, { chats: 1 }).lean();
             console.log("mongo convo vvv");
             console.log(mongoConvos.chats);
-
 
             let result = await mapper(socket.rooms);
             for (let i = 0; i < rooms.length; i++) {
