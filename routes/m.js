@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const util = require('util');
-const cp = require('child_process');
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
@@ -13,7 +12,9 @@ const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('ffmpeg');
 const streamifier = require('streamifier');
-
+const cp = require('child_process');
+//const { spawn } = require('child_process');
+//const bat = spawn('cmd.exe', ['/c', 'my.bat']);
 
 // file upload
 const aws = require('aws-sdk');
@@ -59,8 +60,42 @@ function uploadS3(req, res) {
 }
 
 const makeMpd = async function(videoUrls, req, res) {
+    const exec_options = {
+        cwd: null,
+        env: null,
+        encoding: 'utf8',
+        timeout: 0,
+        maxBuffer: 200 * 1024
+    };
 
-    res.status(200).send({ querystatus: "Testing cp process & mpd generation" });
+//    const cp = spawn('cmd.exe', ['ls']);
+//    cp.stdout.on('data', (data) => {
+//        console.log(data.toString());
+//    });
+//    cp.exec('dir', exec_options, (err, stdout, stderr) => {
+//        console.log('#1. exec');
+//        console.log(stdout);
+//    })
+//
+    try {
+        let data = cp.execSync('scripts/src/out/Release/packager.exe', ['--help'], exec_options);
+        console.log('#2. exec sync');
+        console.log(data.toString());
+    } catch (err) {
+        console.log(err);
+    }
+//
+//    cp.exec('ls -al', exec_options, (err, stdout, stderr) => {
+//        console.log('#3. exec');
+//        console.log(stdout);
+//    })
+
+//    cp.exec('cd ../scripts/src/out/Release && dir', exec_options, (err, stdout, stderr) => {
+//        console.log('#4. exec shaka');
+//        console.log(stdout);
+//    })
+
+    // res.status(200).send({ querystatus: "Testing cp process & mpd generation" });
 }
 /* Uploads individual amazon objects in videoUrls array to amazon
 */
@@ -126,8 +161,8 @@ const convertVideos = async function(i, originalVideo, videoUrls, generatedUuid,
         }
     } else {
         console.log("Finished converting videos");
-        uploadAmazonObjects(await videoUrls, req, res);
-        //makeMpd(await videoUrls, originalVideo, req, res);
+        // uploadAmazonObjects(await videoUrls, req, res);
+        makeMpd(await videoUrls, originalVideo, req, res);
     }
     return videoUrls;
 }
@@ -152,7 +187,7 @@ router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) 
                 || container == "webm" || container == "wmv") {
                 // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
                 // Determine what resolution to downgrade to
-                if (resolution > 360) {
+                if (resolution >= 360) {
                     let ranOnce = false;
                     let l = 0;
                     // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos()

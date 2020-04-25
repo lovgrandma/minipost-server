@@ -10,7 +10,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('./models/user');
 const Chat = require('./models/chat');
-const lzw = require('./compression/lzw');
+const lzw = require('./scripts/compression/lzw');
 
 exports = module.exports = function(io){
 
