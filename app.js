@@ -19,6 +19,7 @@ const app = express();
 const server = require('http').createServer(app);
 const io = require('socket.io')(server);
 const socketRoutes = require('./socket')(io);
+const users = require('./routes/m')(io);
 
 // parse incoming requests as json and make it accessible from req body property.
 app.use(bodyParser.json({
@@ -85,7 +86,6 @@ app.use(function (req, res, next) {
 });
 
 // Use Routes
-const users = require('./routes/m');
 app.use('/m/', users);
 
 // The following disables caching essentially. Dont use this. 
@@ -120,6 +120,7 @@ app.use(function(err, req, res, next) {
 })
 
 const port = process.env.PORT || 5000;
-//server.listen(portSocket, () => console.log(`Listening on port ${portSocket} for socket connections`));
+server.setTimeout(10*60*1000);
 server.listen(port, () => console.log(`Minireel server started on port ${port}`));
 
+module.exports = {io};

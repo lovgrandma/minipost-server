@@ -90,7 +90,6 @@ exports = module.exports = function(io){
             let temp = await redisclient.getAsync(room);
             if (!temp) {
                 chat = await Chat.findOne({_id: room}).lean();
-                // console.log(chat);
                 redisclient.set(room, JSON.stringify(chat));
                 temp = await redisclient.getAsync(room);
             }
