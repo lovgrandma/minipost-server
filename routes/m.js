@@ -1,3 +1,9 @@
+/** Main Routes file m.js
+@version 1.0
+@author Jesse Thompson
+Handles calls to mongodb, user authentication, chat functionality, etc
+*/
+
 const express = require('express');
 const router = express.Router();
 const util = require('util');
@@ -62,7 +68,7 @@ module.exports = function(io) {
         })
     }
 
-    const makeMpd = async function(objUrls, originalVideo, room, req, res) {
+    const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid) {
         console.log("Generating Mpd");
         const exec_options = {
             cwd: null,
@@ -101,6 +107,8 @@ module.exports = function(io) {
             let data = cp.exec(command + " " + args, function(err, stdout, stderr) {
                 if (err) {
                     console.log(err);
+                    deleteVideoArray(objUrls, originalVideo, room);
+                    console.log("Something went wrong, mpd was not created");
                 } else {
                     console.log(data.toString());
                     try {
@@ -110,7 +118,10 @@ module.exports = function(io) {
                                 "detail" : "mpd"
                             };
                             objUrls.push(mpdObj);
-                            uploadAmazonObjects(objUrls, originalVideo, room, req, res);
+                            uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid);
+                        } else {
+                            deleteVideoArray(objUrls, originalVideo, room);
+                            console.log("Something went wrong, mpd was not created");
                         }
                     } catch (err) {
                         console.log(err);
@@ -122,16 +133,37 @@ module.exports = function(io) {
         }
     }
 
+    const makeVideoRecord = async function(s3Objects, body, generatedUuid) {
+        let objLocations = [];
+        let mpdLoc = "";
+        for (obj of s3Objects) {
+            objLocations.push(obj.location);
+            if (obj.location.match(/.*(mpd).*/)) {
+                mpdLoc = obj.location.match(/.*(mpd).*/)[0];
+            }
+        }
+        let videoData = {
+            _id: generatedUuid,
+            title: "",
+            mpd: mpdLoc,
+            locations: objLocations,
+            author: body.user,
+            upvotes: 0,
+            downvotes: 0
+        };
+        console.log(videoData);
+    }
+
     // Uploads individual amazon objects in array to amazon
-    const uploadAmazonObjects = async function(objUrls, originalVideo, room, req, res) {
+    const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid) {
         // The locations array will hold the location of the file once uploaded and "detail"
         // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
         // Use the locations array to build the dash mpd file
+        io.to(room).emit('uploadUpdate', "upltoserver");
         let s3Objects = [];
         if (objUrls.length == 0) {
             res.status(500).send({ querystatus: "Something went wrong" });
         }
-        console.log("Uploading Amazon Objects");
         console.log(objUrls);
         const keyRegex = /[a-z].*\/([a-z0-9].*)/; // Matches entire key
         const resoRegex = /-([a-z0-9].*)\./; // Matches the detail data at the end of the object key
@@ -147,10 +179,14 @@ module.exports = function(io) {
                     if (data) {
                         if (i == objUrls.length-1) {
                             console.log("Upload to S3 Complete");
+                            io.to(room).emit('uploadUpdate', "uplcomplete");
+                            makeVideoRecord(s3Objects, body, generatedUuid);
                             deleteVideoArray(objUrls, originalVideo, room);
                         }
                     }
-                };
+                } else {
+                    console.log("Something went wrong, not all objects uploaded to s3");
+                }
             } catch (err) {
                 console.log(err);
             }
@@ -188,10 +224,9 @@ module.exports = function(io) {
         }, 12000);
     }
 
-    const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, req, res) {
+    const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body) {
         if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
             try {
-                console.log(resolutions[i]);
                 console.log("Generated UUID: " + generatedUuid + "-" + resolutions[i]);
                 let process = new ffmpeg(originalVideo);
                 /* If encode audio is set to true, encode audio and run convertVideos at same iteration with encodeAudio set to false
@@ -216,7 +251,7 @@ module.exports = function(io) {
                                         "detail" : "aac"
                                     }
                                     objUrls.push(audioObj)
-                                    convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, req, res);
+                                    convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body);
                                 } else {
                                     console.log(err);
                                     return err;
@@ -239,7 +274,7 @@ module.exports = function(io) {
                                     "detail" : resolutions[i]
                                 };
                                 objUrls.push(videoObj);
-                                convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, req, res);
+                                convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body);
                             } else {
                                 console.log(err);
                                 return err;
@@ -253,8 +288,8 @@ module.exports = function(io) {
                 return e;
             }
         } else {
-            console.log("Finished converting videos");
-            makeMpd(objUrls, originalVideo, room, req, res);
+            io.to(room).emit('uploadUpdate', "VideoConvComplete");
+            makeMpd(objUrls, originalVideo, room, body, generatedUuid);
         }
         return objUrls;
     }
@@ -263,6 +298,7 @@ module.exports = function(io) {
         // 1) Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file. Uses path to determine if viable for ffmpeg conversion
         let objUrls = [];
         try {
+            const body = req.body;
             let fileInfo = path.parse(req.file.filename);
             let originalVideo = './temp/' + fileInfo.name + fileInfo.ext;
             console.log("Original path: " + originalVideo);
@@ -305,11 +341,11 @@ module.exports = function(io) {
                                     console.log("Resolution " + resolution + " >= " + resolutions[i] + " ?");
                                     if (resolution == resolutions[i] || resolution > resolutions[i]) { // Convert at current resolution if match
                                         if (!ranOnce) {
-                                            res.end("Processing beginning;" + room); // Send room back to user so user can connect to socket
+                                            res.end("processbegin;" + room); // Send room back to user so user can connect to socket
                                             console.log("Video uploaded, processing beginning");
                                         }
                                         ranOnce = true;
-                                        objUrls = await convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, req, res);
+                                        objUrls = await convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, body);
                                         return objUrls;
                                     }
                                 };

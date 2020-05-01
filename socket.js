@@ -212,7 +212,17 @@ exports = module.exports = function(io){
             console.log(addedRooms);
             console.log(checkRooms);
             fetchConvos(socket, user); // Fetch convos method
-        })
+        });
+
+        socket.on('joinUploadSession', (data) => {
+            let roomAdded = false;
+            for (room of Object.keys(socket.rooms)) {
+                if (room == data) roomAdded = true;
+            }
+            if (!roomAdded) {
+                socket.join(data);
+            }
+        });
 
         socket.on('typing', (data) => {
             updateType(socket, data);

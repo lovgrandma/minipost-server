@@ -16,18 +16,19 @@ const VideoSchema = new mongoose.Schema({
     },
     title: {
         type: String,
-        required: true,
+        required: false,
     },
-    url: {
+    mpd: {
         type: String,
         unique: true,
         required: true,
     },
-    author: { // author name will be username, not their uuid. To lower # of calls to mongo
-        type: String,
-        required: true,
+    locations: {
+        type: Array,
+        unique: false,
+        requpred: true
     },
-    post: { // reference to post uuid created along with video
+    author: { // author name will be username, not their uuid. To lower # of calls to mongo
         type: String,
         required: true,
     },
