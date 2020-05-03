@@ -109,7 +109,6 @@ module.exports = function(io) {
                     deleteVideoArray(objUrls, originalVideo, room);
                     console.log("Something went wrong, mpd was not created");
                 } else {
-                    console.log(data.toString());
                     try {
                         if (fs.existsSync("./" + expectedMpdPath)) {
                             let mpdObj = {
