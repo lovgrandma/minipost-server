@@ -141,77 +141,79 @@ exports = module.exports = function(io){
             let rooms = obj.ids;
             let user = obj.user;
             let mongoConvos = await User.findOne({username: user }, { chats: 1 }).lean();
-            console.log("mongo convo vvv");
-            console.log(mongoConvos.chats);
+            if (mongoConvos) {
+                console.log("mongo convo vvv");
+                console.log(mongoConvos.chats);
 
-            let result = await mapper(socket.rooms);
-            for (let i = 0; i < rooms.length; i++) {
-                let roomAdded = false;
-                for (let j = 0; j < result.length; j++) {
-                    if (rooms[i] == result[j]) {
-                        roomAdded = true;
+                let result = await mapper(socket.rooms);
+                for (let i = 0; i < rooms.length; i++) {
+                    let roomAdded = false;
+                    for (let j = 0; j < result.length; j++) {
+                        if (rooms[i] == result[j]) {
+                            roomAdded = true;
+                        }
+                    }
+                    if (roomAdded) { // If room added already, take out of array of rooms to join socket to
+                        rooms.splice(rooms[i]);
                     }
                 }
-                if (roomAdded) { // If room added already, take out of array of rooms to join socket to
-                    rooms.splice(rooms[i]);
-                }
-            }
 
-            for (let i = 0; i < mongoConvos.chats[0].confirmed.length; i++) { // get all confirmed chats
-                let add = true;
-                for (let j = 0; j < result.length; j++) {
-                    if (mongoConvos.chats[0].confirmed[i] == rooms[j]) {
-                        add = false;
+                for (let i = 0; i < mongoConvos.chats[0].confirmed.length; i++) { // get all confirmed chats
+                    let add = true;
+                    for (let j = 0; j < result.length; j++) {
+                        if (mongoConvos.chats[0].confirmed[i] == rooms[j]) {
+                            add = false;
+                        }
+                    }
+                    if (add) {
+                        rooms.push(mongoConvos.chats[0].confirmed[i]);
                     }
                 }
-                if (add) {
-                    rooms.push(mongoConvos.chats[0].confirmed[i]);
-                }
-            }
 
-            for (let i = 0; i < mongoConvos.chats[1].pending.length; i++) { // get all pending chats
-                let add = true;
-                for (let j = 0; j < result.length; j++) {
-                    if (mongoConvos.chats[1].pending[i] == rooms[j]) {
-                        add = false;
+                for (let i = 0; i < mongoConvos.chats[1].pending.length; i++) { // get all pending chats
+                    let add = true;
+                    for (let j = 0; j < result.length; j++) {
+                        if (mongoConvos.chats[1].pending[i] == rooms[j]) {
+                            add = false;
+                        }
+                    }
+                    if (add) {
+                        rooms.push(mongoConvos.chats[1].pending[i]);
                     }
                 }
-                if (add) {
-                    rooms.push(mongoConvos.chats[1].pending[i]);
-                }
-            }
-            // Functionality for checking if conversation was deleted, leaves deleted room of socket session
-            // Somewhat uneccesary for now as this is not implemented on client side. Should still work while user is connected to socket
-            for (let i = 0; i < result.length; i++) {
-                let leaveRoom = true;
-                for (let j = 0; j < rooms.length; j++) {
-                    if (result[i] == rooms[j]) {
-                        leaveRoom = false;
+                // Functionality for checking if conversation was deleted, leaves deleted room of socket session
+                // Somewhat uneccesary for now as this is not implemented on client side. Should still work while user is connected to socket
+                for (let i = 0; i < result.length; i++) {
+                    let leaveRoom = true;
+                    for (let j = 0; j < rooms.length; j++) {
+                        if (result[i] == rooms[j]) {
+                            leaveRoom = false;
+                        }
+                    }
+                    if (leaveRoom && (i != 0)) { // leaves room if not present in rooms to join
+                        socket.leave(result[i]);
                     }
                 }
-                if (leaveRoom && (i != 0)) { // leaves room if not present in rooms to join
-                    socket.leave(result[i]);
-                }
-            }
 
-            // Creates promise to join user into rooms existing in rooms array
-            let promises = rooms.map(room => {
-                return new Promise((resolve, reject) => {
-                    socket.join(room, (err) => {
-                        if(err) reject(err);
-                        else resolve(room);
+                // Creates promise to join user into rooms existing in rooms array
+                let promises = rooms.map(room => {
+                    return new Promise((resolve, reject) => {
+                        socket.join(room, (err) => {
+                            if(err) reject(err);
+                            else resolve(room);
+                        })
                     })
                 })
-            })
 
-            const reflect = p => p.then(v => ({v, status: "fulfilled" }), // Condition for determining truthiness of promise
-                            e => ({e, status: "rejected" }));
-            // Returns the results of the promise to add socket to rooms
-            let addedRooms = (await Promise.all(promises.map(reflect))).filter(o => o.status !== 'rejected').map(o => o.v);
-            let checkRooms = Object.keys(socket.rooms); // Gets socket rooms These effectively will be the same excluding the main socket. Can check both of these variables in a console log.
-            console.log(addedRooms);
-            console.log(checkRooms);
-            fetchConvos(socket, user); // Fetch convos method
+                const reflect = p => p.then(v => ({v, status: "fulfilled" }), // Condition for determining truthiness of promise
+                                            e => ({e, status: "rejected" }));
+                // Returns the results of the promise to add socket to rooms
+                let addedRooms = (await Promise.all(promises.map(reflect))).filter(o => o.status !== 'rejected').map(o => o.v);
+                let checkRooms = Object.keys(socket.rooms); // Gets socket rooms These effectively will be the same excluding the main socket. Can check both of these variables in a console log.
+                console.log(addedRooms);
+                console.log(checkRooms);
+                fetchConvos(socket, user); // Fetch convos method
+            }
         });
 
         socket.on('joinUploadSession', (data) => {

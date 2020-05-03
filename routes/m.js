@@ -103,7 +103,6 @@ module.exports = function(io) {
             const expectedMpdPath = "temp/" + objUrls[0].path.match(captureName)[2] + "-mpd.mpd";
             args += "--mpd_output " + relative + expectedMpdPath;
             console.log(command);
-            console.log(args);
             let data = cp.exec(command + " " + args, function(err, stdout, stderr) {
                 if (err) {
                     console.log(err);
@@ -143,14 +142,25 @@ module.exports = function(io) {
             }
         }
         let videoData = {
-            _id: generatedUuid,
             title: "",
             mpd: mpdLoc,
             locations: objLocations,
             author: body.user,
             upvotes: 0,
-            downvotes: 0
+            downvotes: 0,
+            state: Date.parse(new Date)
         };
+        Video.replaceOne({ _id: generatedUuid }, videoData, async function( err, result) {
+            let userObj = await User.findOne({ username: body.user });
+            for (let i = 0; i < userObj.videos.length; i++) {
+                if (userObj.videos[i].id == generatedUuid) {
+                    User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: (Date.parse(new Date).toString())}}}, { upsert: true, new: true},
+                        async function(err, user) {
+                            // Video uploading and recording complete. Advise user
+                        })
+                }
+            }
+        });
         console.log(videoData);
     }
 
@@ -303,69 +313,131 @@ module.exports = function(io) {
             let originalVideo = './temp/' + fileInfo.name + fileInfo.ext;
             console.log("Original path: " + originalVideo);
             let process = new ffmpeg(originalVideo);
-            process.then(async function (video) {
-                // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type ..
-                console.log(video.metadata.video);
-                console.log(video.metadata.audio);
-                console.log(video.metadata.duration);
-                // Video resolution, example 1080p
-                let resolution = video.metadata.video.resolution.w;
-                let container = video.metadata.video.container.toLowerCase();
-                if (supportedContainers.indexOf(container) >= 0) {
-                    // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
-                    // Determine what resolution to downgrade to
-                    if (resolution >= 360) {
-                        let ranOnce = false;
-                        let l = 0;
-                        // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos()
-                        function createUniqueUuid() {
-                            let generatedUuid = uuidv4().split("-").join("");
-                            let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-360.mp4", Range: "bytes=0-9" }).promise();
-                            checkExistingObject.then(async (data, err) => {
-                                l++;
-                                if (data) { // If data was found, generated uuid is not unique. Max 3 tries
-                                    console.log(data);
-                                    if (l < 3) {
-                                        return createUniqueUuid();
+            let userDbObject = await User.findOne({ username: body.user }).lean();
+            let currentlyProcessing = false;
+            if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
+                for (video of userDbObject.videos) {
+                    if (video) {
+                        if (video.state) {
+                            console.log(video.state);
+                            if (video.state.toString().match(/([a-z0-9].*);processing/)) {
+                                console.log("Db shows video already processing");
+                                res.end("processbegin;upl-" + video.id);
+                                currentlyProcessing = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                res.status(500).send({ querystatus: "Something went wrong" });
+            }
+            if (userDbObject && currentlyProcessing == false) {
+                process.then(async function (video) {
+                    // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type ..
+                    console.log(video.metadata.video);
+                    console.log(video.metadata.audio);
+                    console.log(video.metadata.duration);
+                    // Video resolution, example 1080p
+                    let resolution = video.metadata.video.resolution.w;
+                    let container = video.metadata.video.container.toLowerCase();
+                    if (supportedContainers.indexOf(container) >= 0) {
+                        // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
+                        // Determine what resolution to downgrade to
+                        if (resolution >= 360) {
+                            let ranOnce = false;
+                            let l = 0;
+                            // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos()
+                            function createUniqueUuid() {
+                                let generatedUuid = uuidv4().split("-").join("");
+                                let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-360.mp4", Range: "bytes=0-9" }).promise();
+                                checkExistingObject.then(async (data, err) => {
+                                    l++;
+                                    if (data) { // If data was found, generated uuid is not unique. Max 3 tries
+                                        if (l < 3) {
+                                            return createUniqueUuid();
+                                        } else {
+                                            res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
+                                        }
                                     } else {
                                         res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
                                     }
-                                } else {
-                                    res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
-                                }
-                            }).catch(async error => {
-                                console.log("No data found with generatedUUID on object storage, processing");
-                                let room = "upl-" + uuidv4().split("-").join(""); // Socket for updating user on video processing progress
-                                for (let i = 0; i < resolutions.length; i++) {
-                                    // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
-                                    console.log("Resolution " + resolution + " >= " + resolutions[i] + " ?");
-                                    if (resolution == resolutions[i] || resolution > resolutions[i]) { // Convert at current resolution if match
-                                        if (!ranOnce) {
-                                            res.end("processbegin;" + room); // Send room back to user so user can connect to socket
-                                            console.log("Video uploaded, processing beginning");
+                                }).catch(async error => {
+                                    console.log("No data found with generatedUUID on object storage, processing");
+                                    let room = "upl-" + generatedUuid; // Socket for updating user on video processing progress
+                                    for (let i = 0; i < resolutions.length; i++) {
+                                        // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
+                                        console.log("Resolution " + resolution + " >= " + resolutions[i] + " ?");
+                                        if (resolution == resolutions[i] || resolution > resolutions[i]) { // Convert at current resolution if match
+                                            if (!ranOnce) {
+                                                let status = Date.parse(new Date) + ";processing";
+                                                let videoData = {
+                                                    _id: generatedUuid,
+                                                    title: "",
+                                                    mpd: "",
+                                                    locations: [],
+                                                    author: body.user,
+                                                    upvotes: 0,
+                                                    downvotes: 0,
+                                                    state: status
+                                                };
+                                                let videoRef = {
+                                                    id: generatedUuid,
+                                                    state: status
+                                                }
+                                                let createdVideoObj = await Video.create(videoData);
+                                                if (createdVideoObj) {
+                                                    let userObj = await User.findOneAndUpdate({ username: body.user }, {$addToSet: { "videos": videoRef }}, {upsert: true, new: true});
+                                                    if (userObj) {
+                                                        res.end("processbegin;" + room); // Send room back to user so user can connect to socket
+                                                        console.log("Video uploaded, processing beginning");
+                                                        ranOnce = true;
+                                                        objUrls = await convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, body);
+                                                        return objUrls;
+                                                    } else {
+                                                        if (!ranOnce) res.status(500).send({ querystatus: "Something went wrong" });
+                                                    }
+                                                } else {
+                                                    if (!ranOnce) res.status(500).send({ querystatus: "Something went wrong" });
+                                                }
+                                            }
                                         }
-                                        ranOnce = true;
-                                        objUrls = await convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, body);
-                                        return objUrls;
-                                    }
-                                };
-                                if (!ranOnce) res.status(500).send({ querystatus: "Bad Resolution" });
-                            })
-                        };
-                        createUniqueUuid();
+                                    };
+                                    if (!ranOnce) res.status(500).send({ querystatus: "Bad Resolution" });
+                                })
+                            };
+                            createUniqueUuid();
+                        } else {
+                            res.status(500).send({ querystatus: "Bad Resolution" });
+                        }
                     } else {
-                        res.status(500).send({ querystatus: "Bad Resolution" });
+                        res.status(500).send({ querystatus: "Invalid video container" });
                     }
-                } else {
-                    res.status(500).send({ querystatus: "Invalid video container" });
-                }
-            }).catch(error => {
-                console.log(error);
-            });
+                }).catch(error => {
+                    console.log(error);
+                });
+            } else {
+                res.status(500).send({ querystatus: "Something went wrong" });
+            }
         } catch (e) {
             console.log(e);
         }
     });
+
+    /* Deletes one file cleanly */
+    const deleteOne = async (filePath) => {
+        try {
+            fs.unlink(filePath, (err) => {
+                if (err) {
+                    throw err;
+                } else {
+                    console.log(filePath + " deleted");
+                }
+            });
+        } catch (err) {
+            console.log(err);
+        }
+    }
 
     // End of download functionality
     /**************************************************************************************/
@@ -429,7 +501,7 @@ module.exports = function(io) {
                         ]
                     }
                 ],
-                status: 'offline',
+                videos: [],
                 chats: [
                     {
                         confirmed: [

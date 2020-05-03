@@ -40,8 +40,8 @@ const UserSchema = new mongoose.Schema({
         default: 'offline',
         required: true,
     },
-    watching: {
-        type: Object,
+    videos: {
+        type: Array,
         required: true,
     },
     avatarurl: {

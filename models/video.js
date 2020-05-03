@@ -11,7 +11,6 @@ const uuidv4 = require('uuid/v4');
 const VideoSchema = new mongoose.Schema({
     _id: {
         type: String,
-        default: uuidv4,
         required: true
     },
     title: {
@@ -20,16 +19,15 @@ const VideoSchema = new mongoose.Schema({
     },
     mpd: {
         type: String,
-        unique: true,
-        required: true,
+        required: false,
     },
     locations: {
         type: Array,
-        unique: false,
-        requpred: true
+        required: true,
     },
     author: { // author name will be username, not their uuid. To lower # of calls to mongo
         type: String,
+        unique: false,
         required: true,
     },
     upvotes: { // upvote
@@ -39,6 +37,10 @@ const VideoSchema = new mongoose.Schema({
     downvotes: {
         type: Number,
         required: true,
+    },
+    state: {
+        type: String,
+        required: true
     }
 });
 
