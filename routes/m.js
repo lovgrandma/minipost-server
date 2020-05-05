@@ -86,14 +86,10 @@ module.exports = function(io) {
             let args = "";
             for (obj of objUrls) {
                 console.log(obj);
-                console.log(obj.path);
-                console.log(obj.detail);
                 let fileType = "";
                 if (resolutions.toString().indexOf(obj.detail) >= 0) {
-                    console.log("video");
                     fileType = "video";
                 } else if (audioCodecs.toString().indexOf(obj.detail) >= 0) {
-                    console.log("audio");
                     fileType = "audio";
                 } else {
                     fileType = "text";
@@ -106,8 +102,8 @@ module.exports = function(io) {
             let data = cp.exec(command + " " + args, function(err, stdout, stderr) {
                 if (err) {
                     console.log(err);
-                    deleteVideoArray(objUrls, originalVideo, room);
                     console.log("Something went wrong, mpd was not created");
+                    deleteVideoArray(objUrls, originalVideo, room);
                 } else {
                     try {
                         if (fs.existsSync("./" + expectedMpdPath)) {
@@ -118,16 +114,20 @@ module.exports = function(io) {
                             objUrls.push(mpdObj);
                             uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid);
                         } else {
-                            deleteVideoArray(objUrls, originalVideo, room);
                             console.log("Something went wrong, mpd was not created");
+                            deleteVideoArray(objUrls, originalVideo, room);
                         }
                     } catch (err) {
                         console.log(err);
+                        console.log("Something went wrong, mpd was not created");
+                        deleteVideoArray(objUrls, originalVideo, room);
                     }
                 }
             });
         } catch (err) {
             console.log(err);
+            console.log("Something went wrong, mpd was not created");
+            deleteVideoArray(objUrls, originalVideo, room);
         }
     }
 
@@ -155,12 +155,11 @@ module.exports = function(io) {
                 if (userObj.videos[i].id == generatedUuid) {
                     User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: (Date.parse(new Date).toString())}}}, { upsert: true, new: true},
                         async function(err, user) {
-                            // Video uploading and recording complete. Advise user
+                            // Video uploading and record complete. Advise user
                         })
                 }
             }
         });
-        console.log(videoData);
     }
 
     // Uploads individual amazon objects in array to amazon
@@ -179,7 +178,6 @@ module.exports = function(io) {
         let uploadData;
         for (let i = 0; i < objUrls.length; i++) {
             try {
-                console.log("Uploading " + objUrls[i].path + " to s3");
                 let data = fs.createReadStream(objUrls[i].path);
                 uploadData = await s3.upload({ Bucket: 'minifs', Key: objUrls[i].path.match(keyRegex)[1], Body: data }).promise();
                 if (await uploadData) { // Wait for data to be uploaded to S3
@@ -195,9 +193,12 @@ module.exports = function(io) {
                     }
                 } else {
                     console.log("Something went wrong, not all objects uploaded to s3");
+                    deleteVideoArray(objUrls, originalVideo, room);
                 }
             } catch (err) {
                 console.log(err);
+                console.log("Something went wrong, not all objects uploaded to s3");
+                deleteVideoArray(objUrls, originalVideo, room);
             }
         }
     };
@@ -236,11 +237,10 @@ module.exports = function(io) {
     const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body) {
         if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
             try {
-                console.log("Generated UUID: " + generatedUuid + "-" + resolutions[i]);
                 let process = new ffmpeg(originalVideo);
                 /* If encode audio is set to true, encode audio and run convertVideos at same iteration with encodeAudio set to false
-            Encodes audio once. Add support in future for multiple audio encodings.
-            */
+                Encodes audio once. Add support in future for multiple audio encodings.
+                */
                 const format = "mp4";
                 const audioFormat = "mp4";
                 if (encodeAudio) {
@@ -318,7 +318,6 @@ module.exports = function(io) {
                 for (video of userDbObject.videos) {
                     if (video) {
                         if (video.state) {
-                            console.log(video.state);
                             if (video.state.toString().match(/([a-z0-9].*);processing/)) {
                                 console.log("Db shows video already processing");
                                 res.end("processbegin;upl-" + video.id);
