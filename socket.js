@@ -253,8 +253,6 @@ exports = module.exports = function(io){
     io.on('reconnect_attempt', () => {
         socket.io.opts.transports = ['polling', 'websocket'];
     });
-
-
     // Client side
     // When user sends message, wait until socket is created and returns new chat before allowing another chat to be sent. (Spinner animation)
     // Unless nonfriends, users will not be able to communicate if sockets is not functioning or connecting session

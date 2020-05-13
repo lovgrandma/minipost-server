@@ -36,7 +36,6 @@ module.exports = function(io) {
     Object.freeze(resolutions); Object.freeze(audioCodecs);
     const captureS3Object = /([a-z].*)\/([a-z].*[0-9)].*)-/; // Matches name on s3 object url
 
-
     let uploadCheck = multer({
         storage: multer.diskStorage({
             destination: './temp/',
@@ -103,6 +102,7 @@ module.exports = function(io) {
                 if (err) {
                     console.log(err);
                     console.log("Something went wrong, mpd was not created");
+                    io.to(room).emit('uploadErr', "Conversion error");
                     deleteVideoArray(objUrls, originalVideo, room);
                 } else {
                     try {
@@ -115,11 +115,13 @@ module.exports = function(io) {
                             uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid);
                         } else {
                             console.log("Something went wrong, mpd was not created");
+                            io.to(room).emit('uploadErr', "Conversion error");
                             deleteVideoArray(objUrls, originalVideo, room);
                         }
                     } catch (err) {
                         console.log(err);
                         console.log("Something went wrong, mpd was not created");
+                        io.to(room).emit('uploadErr', "Conversion error");
                         deleteVideoArray(objUrls, originalVideo, room);
                     }
                 }
@@ -127,6 +129,7 @@ module.exports = function(io) {
         } catch (err) {
             console.log(err);
             console.log("Something went wrong, mpd was not created");
+            io.to(room).emit('uploadErr', "Conversion error");
             deleteVideoArray(objUrls, originalVideo, room);
         }
     }
@@ -140,22 +143,22 @@ module.exports = function(io) {
                 mpdLoc = obj.location.match(/.*(mpd).*/)[0];
             }
         }
-        let videoData = {
-            title: "",
-            mpd: mpdLoc,
-            locations: objLocations,
-            author: body.user,
-            upvotes: 0,
-            downvotes: 0,
-            state: Date.parse(new Date)
-        };
-        Video.replaceOne({ _id: generatedUuid }, videoData, async function( err, result) {
+
+        Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true }, async function( err, result) {
+            let mpd;
+            if (result.mpd) {
+                mpd = result.mpd;
+            }
             let userObj = await User.findOne({ username: body.user });
             for (let i = 0; i < userObj.videos.length; i++) {
                 if (userObj.videos[i].id == generatedUuid) {
-                    User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: (Date.parse(new Date).toString())}}}, { upsert: true, new: true},
+                    let awaitingInfo = "";
+                    if (result.title.length == 0) { // If user has not entered a title, the video still requires info from the user
+                        awaitingInfo = ";awaitinginfo";
+                    }
+                    User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo }}}, { upsert: true, new: true},
                         async function(err, user) {
-                            // Video uploading and record complete. Advise user
+                            io.to(room).emit('uploadUpdate', "video ready;" + mpd);
                         })
                 }
             }
@@ -167,10 +170,11 @@ module.exports = function(io) {
         // The locations array will hold the location of the file once uploaded and "detail"
         // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
         // Use the locations array to build the dash mpd file
-        io.to(room).emit('uploadUpdate', "upltoserver");
+        io.to(room).emit('uploadUpdate', "uploading content to server");
         let s3Objects = [];
         if (objUrls.length == 0) {
-            res.status(500).send({ querystatus: "Something went wrong" });
+            io.to(room).emit('uploadErr', "Something went wrong");
+            deleteVideoArray(objUrls, originalVideo, room);
         }
         console.log(objUrls);
         const keyRegex = /[a-z].*\/([a-z0-9].*)/; // Matches entire key
@@ -186,18 +190,20 @@ module.exports = function(io) {
                     if (data) {
                         if (i == objUrls.length-1) {
                             console.log("Upload to S3 Complete");
-                            io.to(room).emit('uploadUpdate', "uplcomplete");
+                            io.to(room).emit('uploadUpdate', "upload complete");
                             makeVideoRecord(s3Objects, body, generatedUuid);
                             deleteVideoArray(objUrls, originalVideo, room);
                         }
                     }
                 } else {
                     console.log("Something went wrong, not all objects uploaded to s3");
+                    io.to(room).emit('uploadErr', "Something went wrong");
                     deleteVideoArray(objUrls, originalVideo, room);
                 }
             } catch (err) {
                 console.log(err);
                 console.log("Something went wrong, not all objects uploaded to s3");
+                io.to(room).emit('uploadErr', "Something went wrong");
                 deleteVideoArray(objUrls, originalVideo, room);
             }
         }
@@ -269,6 +275,7 @@ module.exports = function(io) {
                         } else {
                             deleteVideoArray(objUrls, originalVideo, room);
                             console.log("Audio codec not supported");
+                            io.to(room).emit('uploadErr', "Audio codec not supported");
                         }
                     });
                 } else {
@@ -285,6 +292,7 @@ module.exports = function(io) {
                                 objUrls.push(videoObj);
                                 convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body);
                             } else {
+                                io.to(room).emit('uploadErr', "Conversion error");
                                 console.log(err);
                                 return err;
                             }
@@ -294,10 +302,11 @@ module.exports = function(io) {
             } catch (e) {
                 console.log("Error code: " + e.code);
                 console.log("Error msg: " + e.msg);
+                io.to(room).emit('uploadErr', "Conversion error");
                 return e;
             }
         } else {
-            io.to(room).emit('uploadUpdate', "VideoConvComplete");
+            io.to(room).emit('uploadUpdate', "video conversion complete");
             makeMpd(objUrls, originalVideo, room, body, generatedUuid);
         }
         return objUrls;
@@ -314,12 +323,14 @@ module.exports = function(io) {
             let process = new ffmpeg(originalVideo);
             let userDbObject = await User.findOne({ username: body.user }).lean();
             let currentlyProcessing = false;
+            let room = "";
             if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
                 for (video of userDbObject.videos) {
                     if (video) {
                         if (video.state) {
                             if (video.state.toString().match(/([a-z0-9].*);processing/)) {
                                 console.log("Db shows video already processing");
+                                room = "upl-" + video.id;
                                 res.end("processbegin;upl-" + video.id);
                                 currentlyProcessing = true;
                                 break;
@@ -355,14 +366,16 @@ module.exports = function(io) {
                                         if (l < 3) {
                                             return createUniqueUuid();
                                         } else {
-                                            res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
+                                            res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
+                                            deleteOne(originalVideo);
                                         }
                                     } else {
-                                        res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid" });
+                                        res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
+                                        deleteOne(originalVideo);
                                     }
                                 }).catch(async error => {
                                     console.log("No data found with generatedUUID on object storage, processing");
-                                    let room = "upl-" + generatedUuid; // Socket for updating user on video processing progress
+                                    room = "upl-" + generatedUuid; // Socket for updating user on video processing progress
                                     for (let i = 0; i < resolutions.length; i++) {
                                         // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
                                         console.log("Resolution " + resolution + " >= " + resolutions[i] + " ?");
@@ -372,6 +385,8 @@ module.exports = function(io) {
                                                 let videoData = {
                                                     _id: generatedUuid,
                                                     title: "",
+                                                    description: "",
+                                                    tags: "",
                                                     mpd: "",
                                                     locations: [],
                                                     author: body.user,
@@ -387,35 +402,45 @@ module.exports = function(io) {
                                                 if (createdVideoObj) {
                                                     let userObj = await User.findOneAndUpdate({ username: body.user }, {$addToSet: { "videos": videoRef }}, {upsert: true, new: true});
                                                     if (userObj) {
-                                                        res.end("processbegin;" + room); // Send room back to user so user can connect to socket
-                                                        console.log("Video uploaded, processing beginning");
+                                                        res.status(200).send({querystatus: "processbegin;" + room}); // Send room back to user so user can connect to socket
                                                         ranOnce = true;
                                                         objUrls = await convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, body);
                                                         return objUrls;
                                                     } else {
-                                                        if (!ranOnce) res.status(500).send({ querystatus: "Something went wrong" });
+                                                        if (!ranOnce) {
+                                                            res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
+                                                            deleteOne(originalVideo);
+                                                        }
                                                     }
                                                 } else {
-                                                    if (!ranOnce) res.status(500).send({ querystatus: "Something went wrong" });
+                                                    if (!ranOnce) {
+                                                        res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
+                                                        deleteOne(originalVideo);
+                                                    }
                                                 }
                                             }
                                         }
                                     };
-                                    if (!ranOnce) res.status(500).send({ querystatus: "Bad Resolution" });
+                                    if (!ranOnce) {
+                                        res.status(200).send({ querystatus: "Bad Resolution", err: "reset" });
+                                        deleteOne(originalVideo);
+                                    }
                                 })
                             };
                             createUniqueUuid();
                         } else {
-                            res.status(500).send({ querystatus: "Bad Resolution" });
+                            res.status(200).send({ querystatus: "Bad Resolution", err: "reset" });
+                            deleteOne(originalVideo);
                         }
                     } else {
-                        res.status(500).send({ querystatus: "Invalid video container" });
+                        res.status(200).send({ querystatus: "Invalid video container", err: "reset" });
+                        deleteOne(originalVideo);
                     }
                 }).catch(error => {
                     console.log(error);
                 });
             } else {
-                res.status(500).send({ querystatus: "Something went wrong" });
+                io.to(room).emit('uploadUpdate', "processing;" + room); // Send upload update to room if video is already processing from previous request
             }
         } catch (e) {
             console.log(e);
@@ -585,8 +610,6 @@ module.exports = function(io) {
                 } else {
                     res.clearCookie('connect.sid');
                     res.clearCookie('loggedIn');
-                    console.log("Logged out, redirect home");
-                    console.log('session destroyed');
                     return res.redirect('/');
                 }
             });
@@ -1098,14 +1121,40 @@ module.exports = function(io) {
         }).lean();
     }
 
+    //
+    const getUserVideosf = (req, res, next) => {
+        User.findOne({username: req.body.username}, {username: 1, videos: 1} , async function(err, result) {
+            if (err) throw err;
+            let pendingVideo = false;
+            for (let video of result.videos) {
+                if (video) {
+                    if (video.state.toString().match(/([a-z0-9].*);processing/)) {
+                        pendingVideo = true;
+                        res.json({ querystatus: video.id + ";processing"  });
+                        break;
+                    } else if (video.state.toString().match(/([a-z0-9].*);awaitinginfo/)) {
+                        if (!pendingVideo) {
+                            let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
+                            pendingVideo = true;
+                            res.json({ querystatus: videoNeedsInfo.mpd + ";awaitinginfo" });
+                        }
+                    }
+                }
+            }
+            if (!pendingVideo) {
+                res.json({ querystatus: "no pending videos" });
+            }
+        }).lean();
+    }
+
     const getfriendsf = (req, res, next) => {
+        console.log(req.body.username);
         User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
             if (err) throw err;
             let userfriendslist;
             if (result.friends) {
                 userfriendslist = result.friends[0].confirmed;
             }
-            //  console.log('getfriends' + userfriendslist);
             res.json(userfriendslist);
         }).lean();
     }
@@ -1377,6 +1426,10 @@ module.exports = function(io) {
     router.post('/getfriends', (req, res, next) => {
         return getfriendsf(req, res, next);
     });
+
+    router.post('/getUserVideos', (req, res, next) => {
+        return getUserVideosf(req, res, next);
+    })
 
     // Gets chat logs
 
