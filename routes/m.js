@@ -1,7 +1,7 @@
 /** Main Routes file m.js
 @version 1.0
 @author Jesse Thompson
-Handles calls to mongodb, user authentication, chat functionality, etc
+Handles calls to mongodb, user authentication, chat functionality, video upload and records etc
 */
 
 const express = require('express');
@@ -36,7 +36,31 @@ module.exports = function(io) {
     Object.freeze(resolutions); Object.freeze(audioCodecs);
     const captureS3Object = /([a-z].*)\/([a-z].*[0-9)].*)-/; // Matches name on s3 object url
 
-    let uploadCheck = multer({
+    process.env.PUBLIC_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.public, 'utf8');
+    process.env.PRIVATE_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.private , 'utf8');
+    // Credentials for cloudFront cookie signing
+    const cloudFront = new aws.CloudFront.Signer(
+        process.env.PUBLIC_KEY,
+        process.env.PRIVATE_KEY
+    );
+
+    // Policy for cloudfront cookies
+    const policy = JSON.stringify({
+        Statement: [
+            {
+                Resource: 'http*://d3oyqm71scx51z.cloudfront.net/*',
+                Condition: {
+                    DateLessThan: {
+                        'AWS:EpochTime':
+                        Math.floor(new Date().getTime() / 1000) + 60 * 60 * 1, // Current Time in UTC + time in seconds, (60 * 60 * 1 = 1 hour)
+                    },
+                }
+            }
+        ]
+    })
+
+    /* Uploads single video to temporary storage to be used to check if video is viable for converting */
+    const uploadCheck = multer({
         storage: multer.diskStorage({
             destination: './temp/',
             filename: function(req, file, cb) {
@@ -46,25 +70,16 @@ module.exports = function(io) {
     });
 
     const storage = multer.memoryStorage();
-    let file = multer({
+    const file = multer({
         storage,
         fileFilter: (req, file, cb) => {
             return cb(null, true);
         }
     }).any();
 
-    function uploadS3(req, res) {
-        let downloadUrl = 'https://minifs.s3.' + s3Cred.awsConfig.region + '.amazonaws.com/';
-        return new Promise((resolve, reject) => {
-            return singleUpload(req, res, err => {
-                downloadUrl += req.generatedKey;
-                if (err) {
-                    return reject(err);
-                } else {
-                    return resolve(downloadUrl);
-                }
-            })
-        })
+    const createObj = (obj) => {
+        let newObj = {};
+        return Object.assign(newObj, obj);
     }
 
     const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid) {
@@ -78,29 +93,35 @@ module.exports = function(io) {
         };
 
         const relative = "../../../../";
-        const captureName = /\/([a-z].*)\/([a-z0-9].*)-/;
-        const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)/;
+        const captureName = /([a-z].*)\/([a-z0-9].*)-/;
+        const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
+        let delArr = [];
+        const rawObjUrls = [];
+        for (let i = 0; i < objUrls.length; i++) {
+            rawObjUrls[i] = createObj(objUrls[i]);
+        }
         try {
             let command = "cd scripts/src/out/Release && packager.exe";
             let args = "";
             for (obj of objUrls) {
-                console.log(obj);
+                let detail = obj.detail;
                 let fileType = "";
                 if (resolutions.toString().indexOf(obj.detail) >= 0) {
                     fileType = "video";
                 } else if (audioCodecs.toString().indexOf(obj.detail) >= 0) {
                     fileType = "audio";
+                    detail = "audio";
                 } else {
                     fileType = "text";
                 }
-                args += "in=" + relative + obj.path.match(matchPathExcludePeriod)[0] + ",stream=" + fileType + ",output=" + obj.path.match(captureName)[2] + "-" + obj.detail + ".mp4" + " ";
+                args += "in=" + relative + obj.path + ",stream=" + fileType + ",output=" + relative + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
+                obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4";
             }
-            const expectedMpdPath = "temp/" + objUrls[0].path.match(captureName)[2] + "-mpd.mpd";
+            const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd";
             args += "--mpd_output " + relative + expectedMpdPath;
-            console.log(command);
+            console.log(command + " " + args);
             let data = cp.exec(command + " " + args, function(err, stdout, stderr) {
                 if (err) {
-                    console.log(err);
                     console.log("Something went wrong, mpd was not created");
                     io.to(room).emit('uploadErr', "Conversion error");
                     deleteVideoArray(objUrls, originalVideo, room);
@@ -108,21 +129,23 @@ module.exports = function(io) {
                     try {
                         if (fs.existsSync("./" + expectedMpdPath)) {
                             let mpdObj = {
-                                "path" : "./" + expectedMpdPath,
+                                "path" : expectedMpdPath,
                                 "detail" : "mpd"
                             };
                             objUrls.push(mpdObj);
-                            uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid);
+                            uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls);
                         } else {
                             console.log("Something went wrong, mpd was not created");
                             io.to(room).emit('uploadErr', "Conversion error");
-                            deleteVideoArray(objUrls, originalVideo, room);
+                            delArr.push(...objUrls, ...rawObjUrls);
+                            deleteVideoArray(delArray, originalVideo, room);
                         }
                     } catch (err) {
                         console.log(err);
                         console.log("Something went wrong, mpd was not created");
                         io.to(room).emit('uploadErr', "Conversion error");
-                        deleteVideoArray(objUrls, originalVideo, room);
+                        delArr.push(...objUrls, ...rawObjUrls);
+                        deleteVideoArray(delArray, originalVideo, room);
                     }
                 }
             });
@@ -130,7 +153,8 @@ module.exports = function(io) {
             console.log(err);
             console.log("Something went wrong, mpd was not created");
             io.to(room).emit('uploadErr', "Conversion error");
-            deleteVideoArray(objUrls, originalVideo, room);
+            delArr.push(...objUrls, ...rawObjUrls);
+            deleteVideoArray(delArray, originalVideo, room);
         }
     }
 
@@ -146,9 +170,7 @@ module.exports = function(io) {
 
         Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true }, async function( err, result) {
             let mpd;
-            if (result.mpd) {
-                mpd = result.mpd;
-            }
+            if (result.mpd) mpd = result.mpd;
             let userObj = await User.findOne({ username: body.user });
             for (let i = 0; i < userObj.videos.length; i++) {
                 if (userObj.videos[i].id == generatedUuid) {
@@ -158,7 +180,7 @@ module.exports = function(io) {
                     }
                     User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo }}}, { upsert: true, new: true},
                         async function(err, user) {
-                            io.to(room).emit('uploadUpdate', "video ready;" + mpd);
+                            io.to(room).emit('uploadUpdate', "video ready;" + serveCloudFrontUrl(mpd));
                         })
                 }
             }
@@ -166,7 +188,7 @@ module.exports = function(io) {
     }
 
     // Uploads individual amazon objects in array to amazon
-    const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid) {
+    const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls) {
         // The locations array will hold the location of the file once uploaded and "detail"
         // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
         // Use the locations array to build the dash mpd file
@@ -174,9 +196,9 @@ module.exports = function(io) {
         let s3Objects = [];
         if (objUrls.length == 0) {
             io.to(room).emit('uploadErr', "Something went wrong");
-            deleteVideoArray(objUrls, originalVideo, room);
+            deleteVideoArray(delArray, originalVideo, room);
         }
-        console.log(objUrls);
+        let delArr = [];
         const keyRegex = /[a-z].*\/([a-z0-9].*)/; // Matches entire key
         const resoRegex = /-([a-z0-9].*)\./; // Matches the detail data at the end of the object key
         let uploadData;
@@ -192,24 +214,26 @@ module.exports = function(io) {
                             console.log("Upload to S3 Complete");
                             io.to(room).emit('uploadUpdate', "upload complete");
                             makeVideoRecord(s3Objects, body, generatedUuid);
-                            deleteVideoArray(objUrls, originalVideo, room);
+                            delArr.push(...objUrls, ...rawObjUrls);
+                            deleteVideoArray(delArr, originalVideo, room);
                         }
                     }
                 } else {
                     console.log("Something went wrong, not all objects uploaded to s3");
                     io.to(room).emit('uploadErr', "Something went wrong");
-                    deleteVideoArray(objUrls, originalVideo, room);
+                    delArr.push(...objUrls, ...rawObjUrls);
+                    deleteVideoArray(delArray, originalVideo, room);
                 }
             } catch (err) {
-                console.log(err);
                 console.log("Something went wrong, not all objects uploaded to s3");
                 io.to(room).emit('uploadErr', "Something went wrong");
-                deleteVideoArray(objUrls, originalVideo, room);
+                delArr.push(...objUrls, ...rawObjUrls);
+                deleteVideoArray(delArray, originalVideo, room);
             }
         }
     };
 
-    // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not busy.
+    // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.
     const deleteVideoArray = function(videos, original, room) {
         setTimeout(function() {
             for (let i = 0; i < videos.length; i++) {
@@ -241,12 +265,11 @@ module.exports = function(io) {
     }
 
     const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body) {
+        /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
+                */
         if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
             try {
                 let process = new ffmpeg(originalVideo);
-                /* If encode audio is set to true, encode audio and run convertVideos at same iteration with encodeAudio set to false
-                Encodes audio once. Add support in future for multiple audio encodings.
-                */
                 const format = "mp4";
                 const audioFormat = "mp4";
                 if (encodeAudio) {
@@ -258,16 +281,19 @@ module.exports = function(io) {
                             } else {
                                 audio.addCommand('-c:a', "aac"); // Converts audio if in other format
                             }
-                            audio.save('./temp/' + generatedUuid + "-audio" + "." + audioFormat, async function (err, file) {
+                            let rawPath = "temp/" + generatedUuid + "-audio" + "-raw" + "." + audioFormat;
+                            audio.save("./" + rawPath, async function (err, file) {
                                 if (!err) {
                                     console.log('Audio file: ' + file);
                                     let audioObj = {
-                                        "path" : './temp/' + generatedUuid + "-audio" + "." + audioFormat,
+                                        "path" : rawPath,
                                         "detail" : "aac"
                                     }
                                     objUrls.push(audioObj)
                                     convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body);
                                 } else {
+                                    deleteVideoArray(objUrls, originalVideo, room);
+                                    io.to(room).emit('uploadErr', "Something went wrong");
                                     console.log(err);
                                     return err;
                                 }
@@ -280,18 +306,20 @@ module.exports = function(io) {
                     });
                 } else {
                     process.then(async function (video) {
+                        let rawPath = "temp/" + generatedUuid + "-" + resolutions[i] + "-raw" + "." + format;
                         video.setVideoSize(resolutions[i] + "x?", true, true).setDisableAudio();
                         video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
-                        video.save('./temp/' + generatedUuid + "-" + resolutions[i] + "." + format, async function (err, file) {
+                        video.save("./" + rawPath, async function (err, file) {
                             if (!err) {
                                 console.log('Video file: ' + file);
                                 let videoObj = {
-                                    "path" : './temp/' + generatedUuid + "-" + resolutions[i] + "." + format,
+                                    "path" : rawPath,
                                     "detail" : resolutions[i]
                                 };
                                 objUrls.push(videoObj);
                                 convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body);
                             } else {
+                                deleteVideoArray(objUrls, originalVideo, room);
                                 io.to(room).emit('uploadErr', "Conversion error");
                                 console.log(err);
                                 return err;
@@ -300,8 +328,8 @@ module.exports = function(io) {
                     });
                 }
             } catch (e) {
-                console.log("Error code: " + e.code);
                 console.log("Error msg: " + e.msg);
+                deleteVideoArray(objUrls, originalVideo, room);
                 io.to(room).emit('uploadErr', "Conversion error");
                 return e;
             }
@@ -386,7 +414,7 @@ module.exports = function(io) {
                                                     _id: generatedUuid,
                                                     title: "",
                                                     description: "",
-                                                    tags: "",
+                                                    tags: [],
                                                     mpd: "",
                                                     locations: [],
                                                     author: body.user,
@@ -465,9 +493,43 @@ module.exports = function(io) {
     // End of download functionality
     /**************************************************************************************/
 
+    // Set cloudfront cookies
+    const setCloudCookies = (req, res) => {
+        const cookie = cloudFront.getSignedCookie({
+            policy
+        });
+        res.cookie('CloudFront-Key-Pair-Id', cookie['CloudFront-Key-Pair-Id'], {
+            //domain: '.minipost.app',
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+            path: '/',
+            httpOnly: true,
+        });
+
+        res.cookie('CloudFront-Policy', cookie['CloudFront-Policy'], {
+            //domain: '.minipost.app',
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+            path: '/',
+            httpOnly: true,
+        });
+
+        res.cookie('CloudFront-Signature', cookie['CloudFront-Signature'], {
+            //domain: '.minipost.app',
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+            path: '/',
+            httpOnly: true,
+        });
+        res.send({ querystatus: 'video permissions received'});
+    };
+
+    const serveCloudFrontUrl = (mpd) => {
+        if (mpd.match(/([a-z0-9].*)\/([a-z0-9].*)/)) {
+            mpd = s3Cred.cdn.cloudFront1 + "/" + mpd.match(/([a-z0-9].*)\/([a-z0-9].*)/)[2];
+        }
+        return mpd;
+    }
+
     // Login function
-    const loginfunc = (req, res, next) => {
-        console.log(req.body.email);
+    const loginfunc = async (req, res, next) => {
         if (req.body.email && req.body.password) {
             User.authenticate(req.body.email, req.body.password, function (error, user) {
                 if (error || !user) {
@@ -616,12 +678,6 @@ module.exports = function(io) {
         } else {
             return res.redirect('/');
         }
-    }
-
-    const mainf = (req, res, next) => {
-        console.log('mainroute');
-        User.find()
-            .then(User => res.json(User))
     }
 
     // Search users that match a specific query. If limit included then return more users in response up to defined limit.
@@ -1126,17 +1182,19 @@ module.exports = function(io) {
         User.findOne({username: req.body.username}, {username: 1, videos: 1} , async function(err, result) {
             if (err) throw err;
             let pendingVideo = false;
-            for (let video of result.videos) {
-                if (video) {
-                    if (video.state.toString().match(/([a-z0-9].*);processing/)) {
-                        pendingVideo = true;
-                        res.json({ querystatus: video.id + ";processing"  });
-                        break;
-                    } else if (video.state.toString().match(/([a-z0-9].*);awaitinginfo/)) {
-                        if (!pendingVideo) {
-                            let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
+            if (result) {
+                for (let video of result.videos) {
+                    if (video) {
+                        if (video.state.toString().match(/([a-z0-9].*);processing/)) {
                             pendingVideo = true;
-                            res.json({ querystatus: videoNeedsInfo.mpd + ";awaitinginfo" });
+                            res.json({ querystatus: video.id + ";processing"  });
+                            break;
+                        } else if (video.state.toString().match(/([a-z0-9].*);awaitinginfo/)) {
+                            if (!pendingVideo) {
+                                let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
+                                pendingVideo = true;
+                                res.json({ querystatus: serveCloudFrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
+                            }
                         }
                     }
                 }
@@ -1392,11 +1450,6 @@ module.exports = function(io) {
         return logoutf(req, res, next);
     });
 
-    // Base route (unused)
-    router.get('/', (req, res, next) => {
-        return mainf(req, res, next);
-    });
-
     // SEARCH / GET USERS THAT MATCH THIS QUERY.
     router.post('/searchusers', (req, res, next) => {
         return searchusersf(req, res, next);
@@ -1429,6 +1482,10 @@ module.exports = function(io) {
 
     router.post('/getUserVideos', (req, res, next) => {
         return getUserVideosf(req, res, next);
+    })
+
+    router.post('/setCloudCookies', (req, res, next) => {
+        return setCloudCookies(req, res, next);
     })
 
     // Gets chat logs

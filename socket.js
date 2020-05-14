@@ -142,9 +142,6 @@ exports = module.exports = function(io){
             let user = obj.user;
             let mongoConvos = await User.findOne({username: user }, { chats: 1 }).lean();
             if (mongoConvos) {
-                console.log("mongo convo vvv");
-                console.log(mongoConvos.chats);
-
                 let result = await mapper(socket.rooms);
                 for (let i = 0; i < rooms.length; i++) {
                     let roomAdded = false;

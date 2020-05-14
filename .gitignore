@@ -3,3 +3,4 @@ config/config.js
 /uploads
 /routes/api/s3credentials.js
 /temp
+/routes/api/keys
