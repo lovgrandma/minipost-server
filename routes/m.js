@@ -31,7 +31,7 @@ module.exports = function(io) {
 
     // Resolutions for video conversion
     const resolutions = [2048, 1440, 1080, 720, 480, 360];
-    const audioCodecs = ["aac", "ac3", "als", "sls", "mp3", "mp2", "mp1", "celp", "hvxc"];
+    const audioCodecs = ["aac", "ac3", "als", "sls", "mp3", "mp2", "mp1", "celp", "hvxc", "pcm_s16le"];
     const supportedContainers = ["mov", "3gpp", "mp4", "avi", "flv", "webm", "mpegts", "wmv"];
     Object.freeze(resolutions); Object.freeze(audioCodecs);
     const captureS3Object = /([a-z].*)\/([a-z].*[0-9)].*)-/; // Matches name on s3 object url
