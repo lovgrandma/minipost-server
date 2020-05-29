@@ -50,3 +50,10 @@ Run by going into redis folder. run with redis-server file in src.
 Can type src/redis-server when in ~/redis/redis-4.0.9/
 
 Informative website https://hackernoon.com/using-redis-with-node-js-8d87a48c5dd7
+
+Remember for saving gitignore changes to files already committed
+
+git rm --cached -r .
+git add .
+git commit
+git push
