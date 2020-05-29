@@ -10,31 +10,25 @@ const util = require('util');
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
+const processvideo = require('./processvideo.js')
 const uuidv4 = require('uuid/v4');
-const redisapp = require('../redis');
-const redisclient = redisapp.redisclient;
+const redis = require('../redis');
+const redisclient = redis.redisclient;
 const stringify = require('json-stringify-safe');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('ffmpeg');
 const streamifier = require('streamifier');
 const cp = require('child_process');
+const CPUs = require('os').cpus().length;
+console.log(CPUs);
 
 module.exports = function(io) {
     // file upload
     const aws = require('aws-sdk');
     const s3Cred = require('./api/s3credentials.js');
     const multer = require('multer');
-    const multerS3 = require('multer-s3');
     aws.config.update(s3Cred.awsConfig);
-    const s3 = new aws.S3();
-
-    // Resolutions for video conversion
-    const resolutions = [2048, 1440, 1080, 720, 480, 360];
-    const audioCodecs = ["aac", "ac3", "als", "sls", "mp3", "mp2", "mp1", "celp", "hvxc", "pcm_s16le"];
-    const supportedContainers = ["mov", "3gpp", "mp4", "avi", "flv", "webm", "mpegts", "wmv"];
-    Object.freeze(resolutions); Object.freeze(audioCodecs);
-    const captureS3Object = /([a-z].*)\/([a-z].*[0-9)].*)-/; // Matches name on s3 object url
 
     process.env.PUBLIC_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.public, 'utf8');
     process.env.PRIVATE_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.private , 'utf8');
@@ -69,428 +63,7 @@ module.exports = function(io) {
         })
     });
 
-    const storage = multer.memoryStorage();
-    const file = multer({
-        storage,
-        fileFilter: (req, file, cb) => {
-            return cb(null, true);
-        }
-    }).any();
-
-    const createObj = (obj) => {
-        let newObj = {};
-        return Object.assign(newObj, obj);
-    }
-
-    const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid) {
-        console.log("Generating Mpd");
-        const exec_options = {
-            cwd: null,
-            env: null,
-            encoding: 'utf8',
-            timeout: 0,
-            maxBuffer: 200 * 1024
-        };
-
-        const relative = "../../../../";
-        const captureName = /([a-z].*)\/([a-z0-9].*)-/;
-        const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
-        let delArr = [];
-        const rawObjUrls = [];
-        for (let i = 0; i < objUrls.length; i++) {
-            rawObjUrls[i] = createObj(objUrls[i]);
-        }
-        try {
-            let command = "cd scripts/src/out/Release && packager.exe";
-            let args = "";
-            for (obj of objUrls) {
-                let detail = obj.detail;
-                let fileType = "";
-                if (resolutions.toString().indexOf(obj.detail) >= 0) {
-                    fileType = "video";
-                } else if (audioCodecs.toString().indexOf(obj.detail) >= 0) {
-                    fileType = "audio";
-                    detail = "audio";
-                } else {
-                    fileType = "text";
-                }
-                args += "in=" + relative + obj.path + ",stream=" + fileType + ",output=" + relative + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
-                obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4";
-            }
-            const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd";
-            args += "--mpd_output " + relative + expectedMpdPath;
-            console.log(command + " " + args);
-            let data = cp.exec(command + " " + args, function(err, stdout, stderr) {
-                if (err) {
-                    console.log("Something went wrong, mpd was not created");
-                    io.to(room).emit('uploadErr', "Conversion error");
-                    deleteVideoArray(objUrls, originalVideo, room);
-                } else {
-                    try {
-                        if (fs.existsSync("./" + expectedMpdPath)) {
-                            let mpdObj = {
-                                "path" : expectedMpdPath,
-                                "detail" : "mpd"
-                            };
-                            objUrls.push(mpdObj);
-                            uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls);
-                        } else {
-                            console.log("Something went wrong, mpd was not created");
-                            io.to(room).emit('uploadErr', "Conversion error");
-                            delArr.push(...objUrls, ...rawObjUrls);
-                            deleteVideoArray(delArray, originalVideo, room);
-                        }
-                    } catch (err) {
-                        console.log(err);
-                        console.log("Something went wrong, mpd was not created");
-                        io.to(room).emit('uploadErr', "Conversion error");
-                        delArr.push(...objUrls, ...rawObjUrls);
-                        deleteVideoArray(delArray, originalVideo, room);
-                    }
-                }
-            });
-        } catch (err) {
-            console.log(err);
-            console.log("Something went wrong, mpd was not created");
-            io.to(room).emit('uploadErr', "Conversion error");
-            delArr.push(...objUrls, ...rawObjUrls);
-            deleteVideoArray(delArray, originalVideo, room);
-        }
-    }
-
-    const makeVideoRecord = async function(s3Objects, body, generatedUuid) {
-        let objLocations = [];
-        let mpdLoc = "";
-        for (obj of s3Objects) {
-            objLocations.push(obj.location);
-            if (obj.location.match(/.*(mpd).*/)) {
-                mpdLoc = obj.location.match(/.*(mpd).*/)[0];
-            }
-        }
-
-        Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true }, async function( err, result) {
-            let mpd;
-            if (result.mpd) mpd = result.mpd;
-            let userObj = await User.findOne({ username: body.user });
-            for (let i = 0; i < userObj.videos.length; i++) {
-                if (userObj.videos[i].id == generatedUuid) {
-                    let awaitingInfo = "";
-                    if (result.title.length == 0) { // If user has not entered a title, the video still requires info from the user
-                        awaitingInfo = ";awaitinginfo";
-                    }
-                    User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo }}}, { upsert: true, new: true},
-                        async function(err, user) {
-                            io.to(room).emit('uploadUpdate', "video ready;" + serveCloudFrontUrl(mpd));
-                        })
-                }
-            }
-        });
-    }
-
-    // Uploads individual amazon objects in array to amazon
-    const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls) {
-        // The locations array will hold the location of the file once uploaded and "detail"
-        // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
-        // Use the locations array to build the dash mpd file
-        io.to(room).emit('uploadUpdate', "uploading content to server");
-        let s3Objects = [];
-        if (objUrls.length == 0) {
-            io.to(room).emit('uploadErr', "Something went wrong");
-            deleteVideoArray(delArray, originalVideo, room);
-        }
-        let delArr = [];
-        const keyRegex = /[a-z].*\/([a-z0-9].*)/; // Matches entire key
-        const resoRegex = /-([a-z0-9].*)\./; // Matches the detail data at the end of the object key
-        let uploadData;
-        for (let i = 0; i < objUrls.length; i++) {
-            try {
-                let data = fs.createReadStream(objUrls[i].path);
-                uploadData = await s3.upload({ Bucket: 'minifs', Key: objUrls[i].path.match(keyRegex)[1], Body: data }).promise();
-                if (await uploadData) { // Wait for data to be uploaded to S3
-                    s3Objects.push({location: uploadData.Location, detail: uploadData.Key.match(resoRegex)[1]});
-                    console.log(uploadData);
-                    if (data) {
-                        if (i == objUrls.length-1) {
-                            console.log("Upload to S3 Complete");
-                            io.to(room).emit('uploadUpdate', "upload complete");
-                            makeVideoRecord(s3Objects, body, generatedUuid);
-                            delArr.push(...objUrls, ...rawObjUrls);
-                            deleteVideoArray(delArr, originalVideo, room);
-                        }
-                    }
-                } else {
-                    console.log("Something went wrong, not all objects uploaded to s3");
-                    io.to(room).emit('uploadErr', "Something went wrong");
-                    delArr.push(...objUrls, ...rawObjUrls);
-                    deleteVideoArray(delArray, originalVideo, room);
-                }
-            } catch (err) {
-                console.log("Something went wrong, not all objects uploaded to s3");
-                io.to(room).emit('uploadErr', "Something went wrong");
-                delArr.push(...objUrls, ...rawObjUrls);
-                deleteVideoArray(delArray, originalVideo, room);
-            }
-        }
-    };
-
-    // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.
-    const deleteVideoArray = function(videos, original, room) {
-        setTimeout(function() {
-            for (let i = 0; i < videos.length; i++) {
-                try {
-                    let object = videos[i].path;
-                    fs.unlink(videos[i].path, (err) => {
-                        if (err) {
-                            throw err
-                        } else {
-                            console.log(object + " deleted from temp storage");
-                        }
-                    });
-                } catch (err) {
-                    console.log(err);
-                }
-            };
-            try {
-                fs.unlink(original, (err) => {
-                    if (err) {
-                        throw err;
-                    } else {
-                        console.log("Original video deleted from temp storage");
-                    }
-                });
-            } catch (err) {
-                console.log(err);
-            }
-        }, 12000);
-    }
-
-    const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body) {
-        /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
-                */
-        if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
-            try {
-                let process = new ffmpeg(originalVideo);
-                const format = "mp4";
-                const audioFormat = "mp4";
-                if (encodeAudio) {
-                    process.then(async function(audio) {
-                        if (audioCodecs.indexOf(audio.metadata.audio.codec.toLowerCase()) >= 0) { // Determine if current audio codec is supported
-                            audio.addCommand('-vn');
-                            if (audio.metadata.audio.codec.toLowerCase() == "aac") {
-                                audio.addCommand('-c:a', "copy"); // Copies current audio format if already in aac format, fast
-                            } else {
-                                audio.addCommand('-c:a', "aac"); // Converts audio if in other format
-                            }
-                            let rawPath = "temp/" + generatedUuid + "-audio" + "-raw" + "." + audioFormat;
-                            audio.save("./" + rawPath, async function (err, file) {
-                                if (!err) {
-                                    console.log('Audio file: ' + file);
-                                    let audioObj = {
-                                        "path" : rawPath,
-                                        "detail" : "aac"
-                                    }
-                                    objUrls.push(audioObj)
-                                    convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body);
-                                } else {
-                                    deleteVideoArray(objUrls, originalVideo, room);
-                                    io.to(room).emit('uploadErr', "Something went wrong");
-                                    console.log(err);
-                                    return err;
-                                }
-                            });
-                        } else {
-                            deleteVideoArray(objUrls, originalVideo, room);
-                            console.log("Audio codec not supported");
-                            io.to(room).emit('uploadErr', "Audio codec not supported");
-                        }
-                    });
-                } else {
-                    process.then(async function (video) {
-                        let rawPath = "temp/" + generatedUuid + "-" + resolutions[i] + "-raw" + "." + format;
-                        video.setVideoSize(resolutions[i] + "x?", true, true).setDisableAudio();
-                        video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
-                        video.save("./" + rawPath, async function (err, file) {
-                            if (!err) {
-                                console.log('Video file: ' + file);
-                                let videoObj = {
-                                    "path" : rawPath,
-                                    "detail" : resolutions[i]
-                                };
-                                objUrls.push(videoObj);
-                                convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body);
-                            } else {
-                                deleteVideoArray(objUrls, originalVideo, room);
-                                io.to(room).emit('uploadErr', "Conversion error");
-                                console.log(err);
-                                return err;
-                            }
-                        });
-                    });
-                }
-            } catch (e) {
-                console.log("Error msg: " + e.msg);
-                deleteVideoArray(objUrls, originalVideo, room);
-                io.to(room).emit('uploadErr', "Conversion error");
-                return e;
-            }
-        } else {
-            io.to(room).emit('uploadUpdate', "video conversion complete");
-            makeMpd(objUrls, originalVideo, room, body, generatedUuid);
-        }
-        return objUrls;
-    }
-
-    router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
-        // 1) Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file. Uses path to determine if viable for ffmpeg conversion
-        let objUrls = [];
-        try {
-            const body = req.body;
-            let fileInfo = path.parse(req.file.filename);
-            let originalVideo = './temp/' + fileInfo.name + fileInfo.ext;
-            console.log("Original path: " + originalVideo);
-            let process = new ffmpeg(originalVideo);
-            let userDbObject = await User.findOne({ username: body.user }).lean();
-            let currentlyProcessing = false;
-            let room = "";
-            if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
-                for (video of userDbObject.videos) {
-                    if (video) {
-                        if (video.state) {
-                            if (video.state.toString().match(/([a-z0-9].*);processing/)) {
-                                console.log("Db shows video already processing");
-                                room = "upl-" + video.id;
-                                res.end("processbegin;upl-" + video.id);
-                                currentlyProcessing = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else {
-                res.status(500).send({ querystatus: "Something went wrong" });
-            }
-            if (userDbObject && currentlyProcessing == false) {
-                process.then(async function (video) {
-                    // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type ..
-                    console.log(video.metadata.video);
-                    console.log(video.metadata.audio);
-                    console.log(video.metadata.duration);
-                    // Video resolution, example 1080p
-                    let resolution = video.metadata.video.resolution.w;
-                    let container = video.metadata.video.container.toLowerCase();
-                    if (supportedContainers.indexOf(container) >= 0) {
-                        // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
-                        // Determine what resolution to downgrade to
-                        if (resolution >= 360) {
-                            let ranOnce = false;
-                            let l = 0;
-                            // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos()
-                            function createUniqueUuid() {
-                                let generatedUuid = uuidv4().split("-").join("");
-                                let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-360.mp4", Range: "bytes=0-9" }).promise();
-                                checkExistingObject.then(async (data, err) => {
-                                    l++;
-                                    if (data) { // If data was found, generated uuid is not unique. Max 3 tries
-                                        if (l < 3) {
-                                            return createUniqueUuid();
-                                        } else {
-                                            res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
-                                            deleteOne(originalVideo);
-                                        }
-                                    } else {
-                                        res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
-                                        deleteOne(originalVideo);
-                                    }
-                                }).catch(async error => {
-                                    console.log("No data found with generatedUUID on object storage, processing");
-                                    room = "upl-" + generatedUuid; // Socket for updating user on video processing progress
-                                    for (let i = 0; i < resolutions.length; i++) {
-                                        // If the resolution of the video is equal to or greater than the iterated resolution, convert to that res and develop copies recursively to lowest resolution
-                                        console.log("Resolution " + resolution + " >= " + resolutions[i] + " ?");
-                                        if (resolution == resolutions[i] || resolution > resolutions[i]) { // Convert at current resolution if match
-                                            if (!ranOnce) {
-                                                let status = Date.parse(new Date) + ";processing";
-                                                let videoData = {
-                                                    _id: generatedUuid,
-                                                    title: "",
-                                                    description: "",
-                                                    tags: [],
-                                                    mpd: "",
-                                                    locations: [],
-                                                    author: body.user,
-                                                    upvotes: 0,
-                                                    downvotes: 0,
-                                                    state: status
-                                                };
-                                                let videoRef = {
-                                                    id: generatedUuid,
-                                                    state: status
-                                                }
-                                                let createdVideoObj = await Video.create(videoData);
-                                                if (createdVideoObj) {
-                                                    let userObj = await User.findOneAndUpdate({ username: body.user }, {$addToSet: { "videos": videoRef }}, {upsert: true, new: true});
-                                                    if (userObj) {
-                                                        res.status(200).send({querystatus: "processbegin;" + room}); // Send room back to user so user can connect to socket
-                                                        ranOnce = true;
-                                                        objUrls = await convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, body);
-                                                        return objUrls;
-                                                    } else {
-                                                        if (!ranOnce) {
-                                                            res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
-                                                            deleteOne(originalVideo);
-                                                        }
-                                                    }
-                                                } else {
-                                                    if (!ranOnce) {
-                                                        res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
-                                                        deleteOne(originalVideo);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    };
-                                    if (!ranOnce) {
-                                        res.status(200).send({ querystatus: "Bad Resolution", err: "reset" });
-                                        deleteOne(originalVideo);
-                                    }
-                                })
-                            };
-                            createUniqueUuid();
-                        } else {
-                            res.status(200).send({ querystatus: "Bad Resolution", err: "reset" });
-                            deleteOne(originalVideo);
-                        }
-                    } else {
-                        res.status(200).send({ querystatus: "Invalid video container", err: "reset" });
-                        deleteOne(originalVideo);
-                    }
-                }).catch(error => {
-                    console.log(error);
-                });
-            } else {
-                io.to(room).emit('uploadUpdate', "processing;" + room); // Send upload update to room if video is already processing from previous request
-            }
-        } catch (e) {
-            console.log(e);
-        }
-    });
-
-    /* Deletes one file cleanly */
-    const deleteOne = async (filePath) => {
-        try {
-            fs.unlink(filePath, (err) => {
-                if (err) {
-                    throw err;
-                } else {
-                    console.log(filePath + " deleted");
-                }
-            });
-        } catch (err) {
-            console.log(err);
-        }
-    }
-
-    // End of download functionality
+    // End of upload functionality
     /**************************************************************************************/
 
     // Set cloudfront cookies
@@ -529,7 +102,7 @@ module.exports = function(io) {
     }
 
     // Login function
-    const loginfunc = async (req, res, next) => {
+    const login = async (req, res, next) => {
         if (req.body.email && req.body.password) {
             User.authenticate(req.body.email, req.body.password, function (error, user) {
                 if (error || !user) {
@@ -558,7 +131,7 @@ module.exports = function(io) {
         }
     };
 
-    const registerfunc = (req, res, next) => {
+    const register = (req, res, next) => {
         if (req.body.username && req.body.regemail && req.body.regpassword && req.body.confirmPassword) {
             // confirm that user typed same password twice
             if (req.body.regpassword !== req.body.confirmPassword) {
@@ -662,7 +235,7 @@ module.exports = function(io) {
     };
 
 
-    const logoutf = (req, res, next) => {
+    const logout = (req, res, next) => {
         console.log('/logout');
         if (req.session) {
             // delete session object
@@ -682,7 +255,7 @@ module.exports = function(io) {
 
     // Search users that match a specific query. If limit included then return more users in response up to defined limit.
     // Use "req.body.limit" for "Load more" functionality on search
-    const searchusersf = (req, res, next) => {
+    const searchusers = (req, res, next) => {
         //    console.log(req.body.searchusers);
         let searchresults = [];
         if (!req.body.searchusers) {
@@ -734,7 +307,7 @@ module.exports = function(io) {
         }
     }
 
-    const requestfriendshipf = (req, res, next) => {
+    const requestfriendship = (req, res, next) => {
         console.log(req.body.thetitleofsomeonewewanttobecloseto, req.body.username);
         if (!req.body.thetitleofsomeonewewanttobecloseto) {
             // stop if there is no information to query.
@@ -798,7 +371,7 @@ module.exports = function(io) {
 
     // the following route request either removes a friend from confirmed or pending list.
     // req.body.pending is a boolean, confirms if revoke pending request, otherwise it is a normal revoke friendship request
-    const revokefriendshipf = (req, res, next) => {
+    const revokefriendship = (req, res, next) => {
         let resEnd = false;
         if (!req.body.thetitleofsomeoneiusedtowanttobecloseto) {
             // stop if there is no information to query.
@@ -962,7 +535,7 @@ module.exports = function(io) {
     }
 
     // Retrieves pending requests in a simple way for signed in user or any username sent with requests.
-    const pendingrequestsf = (req, res, next) => {
+    const pendingrequests = (req, res, next) => {
         // prevent request if username not present
         if (!req.body.username) {
             res.json({querystatus: 'empty username in query'});
@@ -977,7 +550,7 @@ module.exports = function(io) {
     }
 
     // Function to become friends. Adds users username to newfriend confirmed list and adds newfriend to users confirmed list if not already present.
-    const acceptfriendrequestf = (req, res, next) => {
+    const acceptfriendrequest = (req, res, next) => {
         console.log(req.body.username)
         console.log(req.body.newfriend)
         if (!req.body.newfriend) {
@@ -1134,7 +707,7 @@ module.exports = function(io) {
         }
     }
 
-    const getconversationlogsf = (req, res, next) => {
+    const getconversationlogs = (req, res, next) => {
         User.findOne({username: req.body.username}, {chats: 1}, function(err, result) {
             if (err) throw err;
             console.log(result);
@@ -1178,18 +751,28 @@ module.exports = function(io) {
     }
 
     //
-    const getUserVideosf = (req, res, next) => {
+    const getUserVideos = (req, res, next) => {
         User.findOne({username: req.body.username}, {username: 1, videos: 1} , async function(err, result) {
             if (err) throw err;
             let pendingVideo = false;
             if (result) {
                 for (let video of result.videos) {
                     if (video) {
-                        if (video.state.toString().match(/([a-z0-9].*);processing/)) {
-                            pendingVideo = true;
-                            res.json({ querystatus: video.id + ";processing"  });
-                            break;
-                        } else if (video.state.toString().match(/([a-z0-9].*);awaitinginfo/)) {
+                        if (video.state.toString().match(/([0-9].*);processing/)) {
+                            let videoCreationTime = video.state.toString().match(/([0-9].*);/)[1];
+                            let now = Date.parse(new Date).toString();
+                            if (now - videoCreationTime > 14400000) { // 4 hours
+                                console.log("more than 4 hours since video began transcoding");
+                                // It has taken too long to convert the video, it can be deleted. This ensures users db video stack is reset and user is not being asked to fill in detail about a video that will never finish transcoding
+                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}}, async function(err, result) {
+                                    // no video found
+                                });
+                            } else {
+                                pendingVideo = true;
+                                res.json({ querystatus: video.id + ";processing"  });
+                                break;
+                            }
+                        } else if (video.state.toString().match(/([0-9].*);awaitinginfo/)) {
                             if (!pendingVideo) {
                                 let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
@@ -1205,7 +788,7 @@ module.exports = function(io) {
         }).lean();
     }
 
-    const getfriendsf = (req, res, next) => {
+    const getfriends = (req, res, next) => {
         console.log(req.body.username);
         User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
             if (err) throw err;
@@ -1218,7 +801,7 @@ module.exports = function(io) {
     }
 
     // Change functionality of this to redis first, mongo second
-    const beginchatf = (req, res, next) => {
+    const beginchat = (req, res, next) => {
         console.log(req.body.username, req.body.chatwith, req.body.message);
         let booleans = [];
         let chatdata;
@@ -1437,52 +1020,56 @@ module.exports = function(io) {
     }
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
-        return loginfunc(req, res, next);
+        return login(req, res, next);
     });
 
     // ATTEMPT REGISTER
     router.post('/register', (req, res, next) => {
-        return registerfunc(req, res, next);
+        return register(req, res, next);
     });
 
     // LOGOUT
     router.get('/logout', (req, res, next) => {
-        return logoutf(req, res, next);
+        return logout(req, res, next);
     });
 
     // SEARCH / GET USERS THAT MATCH THIS QUERY.
     router.post('/searchusers', (req, res, next) => {
-        return searchusersf(req, res, next);
+        return searchusers(req, res, next);
     });
 
     // REQUEST FRIENDSHIP
     router.post('/requestfriendship', (req, res, next) => {
-        return requestfriendshipf(req, res, next);
+        return requestfriendship(req, res, next);
     });
 
     // REVOKE FRIENDSHIP
     router.post('/revokefriendship', (req, res, next) => {
-        return revokefriendshipf(req, res, next);
+        return revokefriendship(req, res, next);
     });
 
     // GET PENDING REQUESTS
     router.post('/pendingrequests', (req, res, next) => {
-        return pendingrequestsf(req, res, next);
+        return pendingrequests(req, res, next);
     })
 
     // ACCEPT FRIEND REQUEST
     router.post('/acceptfriendrequest', (req, res, next) => {
-        return acceptfriendrequestf(req, res, next);
+        return acceptfriendrequest(req, res, next);
     })
 
     // GET FRIENDS
     router.post('/getfriends', (req, res, next) => {
-        return getfriendsf(req, res, next);
+        return getfriends(req, res, next);
     });
 
     router.post('/getUserVideos', (req, res, next) => {
-        return getUserVideosf(req, res, next);
+        return getUserVideos(req, res, next);
     })
+
+    router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
+        return processvideo.processVideo(req, res, next, io);
+    });
 
     router.post('/setCloudCookies', (req, res, next) => {
         return setCloudCookies(req, res, next);
@@ -1495,7 +1082,7 @@ module.exports = function(io) {
     // Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
 
     router.post('/getconversationlogs', (req, res, next) => {
-        return getconversationlogsf(req, res, next);
+        return getconversationlogs(req, res, next);
     });
 
     // Sends chat message to a chat document.

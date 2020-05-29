@@ -4,3 +4,7 @@ config/config.js
 /routes/api/s3credentials.js
 /temp
 /routes/api/keys
+/scripts/depot_tools/
+/scripts/src/
+/scripts/.gclient
+/scripts/.gclient_entries
