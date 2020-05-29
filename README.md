@@ -1,11 +1,11 @@
 SHAKA PACKAGER
 
-Required for creating mpd files. Will require manual linux installation in scripts folder. May not work if you create shaka_packager folder. Skip and simply run 
+Please install depot tools in scripts folder first, requires python. Then install shaka packager in scripts folder without shaka packager folder. This is required for creating mpd files. Again, will require manual linux installation in scripts folder. May not work if you create shaka_packager folder. Skip and simply run 
 
 $ gclient config https://www.github.com/google/shaka-packager.git --name=src --unmanaged
 $ gclient sync
 
-after installing depot tools. See shaka_packager documentation
+after installing depot tools. See shaka_packager documentation to install shaka.
 
 REDIS
 
