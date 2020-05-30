@@ -177,12 +177,12 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                 process.then(async function(audio) {
                     if (audioCodecs.indexOf(audio.metadata.audio.codec.toLowerCase()) >= 0) { // Determine if current audio codec is supported
                         io.to(room).emit('uploadUpdate', "converting audio file");
-                        audio.addCommand('-vn');
-                        audio.addCommand('-c:a', "aac"); // Converts audio if in other format
                         let rawPath = "temp/" + generatedUuid + "-audio" + "-raw" + "." + audioFormat;
+                        audio.addCommand('-vn');
+                        audio.addCommand('-c:a', "aac"); // Convert all audio to aac, ensure consistency of format
                         audio.addCommand('-b:a', '256k');
-                        if (audio.metadata.audio.channels.value == 0 || audio.metadata.audio.channels.value > 2) {
-                            audio.addCommand('-ac', '2'); // Force to 2 channels. Prevents errors when more than 2 channels (e.g 6 surround)
+                        if (audio.metadata.audio.channels.value == null || audio.metadata.audio.channels.value == 0) {
+                            audio.addCommand('-ac', '6'); // If channels value is null or equal to 0, convert to surround sound
                         }
                         audio.save("./" + rawPath, async function (err, file) {
                             let audioObj = {
