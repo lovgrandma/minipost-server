@@ -39,6 +39,7 @@
     "socket.io": "^2.3.0",
     "streamifier": "^0.1.1",
     "universal-cookie": "^3.0.4",
-    "uuid": "^3.3.2"
+    "uuid": "^3.3.2",
+    "workerpool": "^6.0.0"
   }
 }

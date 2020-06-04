@@ -27,7 +27,7 @@ exports = module.exports = function(io){
                 io.to(decom.match(regex)[3]).emit('typing', data); // echo typing data back to room
                 resolve("complete");
             } else {
-                reject(new Error("String too complex to be decompressed for typing update"));
+                reject(new Error("data too complex to be decompressed for typing update"));
             }
         });
         promise.catch(error => console.log(error.message));
@@ -39,16 +39,14 @@ exports = module.exports = function(io){
         // If mongo returns null run shortened "beginchat" method for redis
         // Add log and set created chat in redis
         // return chat to user
-        console.log(data);
-        let getChat = async (data) => {
-            console.log("data " + data.id); // chat data has id, chatwith, message, and user
+        let getChat = async (data) => { // chat data has id, chatwith, message, and user
             let temp = await redisclient.getAsync(data.id);
             if (!temp) {
                 // The only way this would fail is if somehow the chat was deleted after the user loaded up the page.
                 // The application defaults to load from mongo on load. No chats should be deleted. Only hidden if a user is blocked
                 temp = await Chat.findOne({_id: data.id}).lean();
             }
-            temp = JSON.parse(temp);
+            temp = await JSON.parse(temp);
             let chatinfo = {
                 author: data.user,
                 content: data.message,
@@ -56,8 +54,6 @@ exports = module.exports = function(io){
             }
             temp.log.push(chatinfo); // appends value to temporary chat object
             redisclient.set(data.id, JSON.stringify(temp));
-            console.log(temp);
-            console.log(temp.log.length);
             if ((temp.log.length)%100 == 0) { // update mongo every 100 logs, else socket will take from redis
                 // If query finds a mongo conversation with this id, update the log
                 // Will only fire once as this fires when a user sends a chat. If the chat length at that time of updates' remainder of X amount is 0, then update mongo. Copies whole redis log, does not push.
@@ -87,14 +83,16 @@ exports = module.exports = function(io){
         });
 
         let getChat = async (room) => { // Attempt to get room from redis, if null, create one from mongo query.
-            let temp = await redisclient.getAsync(room);
-            if (!temp) {
-                chat = await Chat.findOne({_id: room}).lean();
-                redisclient.set(room, JSON.stringify(chat));
-                temp = await redisclient.getAsync(room);
+            if (redisclient) {
+                let temp = await redisclient.getAsync(room);
+                if (!temp) {
+                    chat = await Chat.findOne({_id: room}).lean();
+                    redisclient.set(room, JSON.stringify(chat));
+                    temp = await redisclient.getAsync(room);
+                }
+                temp = await JSON.parse(temp);
+                return temp;
             }
-            temp = await JSON.parse(temp);
-            return temp;
         }
 
         let promises = roomsArr.map(room => {
@@ -104,7 +102,6 @@ exports = module.exports = function(io){
         });
 
         let rooms = await Promise.all(promises);
-        console.log("convos to return " + rooms);
         socket.emit("returnConvos", rooms); // emit back rooms joined
     }
 
@@ -119,7 +116,6 @@ exports = module.exports = function(io){
 
     // On connection note connect, on disconnect note disconnect
     io.on("connection", socket => {
-        console.log(socket.rooms);
         console.log("New client connected");
         // Successful receipt of data being emitted from client, consumed by server
         socket.on('join', function(room) {
@@ -137,7 +133,6 @@ exports = module.exports = function(io){
         });
 
         socket.on('joinConvos', async function(obj) { // Sets users rooms based on conversations
-            console.log("s: joinConvos");
             let rooms = obj.ids;
             let user = obj.user;
             let mongoConvos = await User.findOne({username: user }, { chats: 1 }).lean();
@@ -207,8 +202,7 @@ exports = module.exports = function(io){
                 // Returns the results of the promise to add socket to rooms
                 let addedRooms = (await Promise.all(promises.map(reflect))).filter(o => o.status !== 'rejected').map(o => o.v);
                 let checkRooms = Object.keys(socket.rooms); // Gets socket rooms These effectively will be the same excluding the main socket. Can check both of these variables in a console log.
-                console.log(addedRooms);
-                console.log(checkRooms);
+                // log addedRooms and checkRooms to check for successfully added rooms
                 fetchConvos(socket, user); // Fetch convos method
             }
         });
