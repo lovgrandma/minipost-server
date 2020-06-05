@@ -9,7 +9,6 @@ const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
 const servecloudfront = require('./servecloudfront.js');
-const workerpool = require('workerpool');
 
 const mongoose = require('mongoose');
 const session = require('express-session');
@@ -54,7 +53,8 @@ const store = new MongoDBStore(
     }
 );
 
-const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, io) {
+let io = null;
+const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, socket) {
     /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
                 */
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
@@ -83,7 +83,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                             objUrls.push(audioObj);
                             if (!err) {
                                 console.log('Audio file: ' + file);
-                                convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body, io);
+                                return convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body, socket);
                             } else {
                                 console.log(err);
                                 deleteVideoArray(objUrls, originalVideo, room, 100000);
@@ -125,7 +125,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                         objUrls.push(videoObj);
                         if (!err) {
                             console.log('Video file: ' + file);
-                            convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, io);
+                            return convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, socket);
                         } else {
                             console.log(err);
                             deleteVideoArray(objUrls, originalVideo, room, 100000);
@@ -149,12 +149,12 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
         if (io) {
             io.to(room).emit('uploadUpdate', "video conversion complete");
         }
-        makeMpd(objUrls, originalVideo, room, body, generatedUuid, io);
+        makeMpd(objUrls, originalVideo, room, body, generatedUuid, socket);
     }
     return objUrls;
 }
 
-const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid, io) {
+const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid, socket) {
     console.log("Generating Mpd");
     const exec_options = {
         cwd: null,
@@ -207,7 +207,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
                             "detail" : "mpd"
                         };
                         objUrls.push(mpdObj);
-                        uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, io);
+                        uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, socket);
                     } else {
                         console.log("Something went wrong, mpd was not created");
                         if (io) {
@@ -239,7 +239,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
 }
 
 // Uploads individual amazon objects in array to amazon
-const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, io) {
+const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, socket) {
     // The locations array will hold the location of the file once uploaded and "detail"
     // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
     // Use the locations array to build the dash mpd file
@@ -268,7 +268,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                     if (i == objUrls.length-1) {
                         console.log("Upload to S3 Complete");
                         console.log(room);
-                        makeVideoRecord(s3Objects, body, generatedUuid, io);
+                        makeVideoRecord(s3Objects, body, generatedUuid, socket);
                         delArr.push(...objUrls, ...rawObjUrls);
                         deleteVideoArray(delArr, originalVideo, room, 12000);
                         if (io) {
@@ -295,7 +295,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
     }
 };
 
-const makeVideoRecord = async function(s3Objects, body, generatedUuid, io) {
+const makeVideoRecord = async function(s3Objects, body, generatedUuid, socket) {
     let objLocations = [];
     let mpdLoc = "";
     for (obj of s3Objects) {
@@ -320,6 +320,7 @@ const makeVideoRecord = async function(s3Objects, body, generatedUuid, io) {
                 }
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo() }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
+                    console.log(socket + " final finish point processvideo");
                     if (io) {
                         io.to(room).emit('uploadUpdate', "video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
                     }
@@ -378,10 +379,6 @@ const deleteOne = async (filePath) => {
         console.log(err);
     }
 }
-
-workerpool.worker({
-    convertVideos: convertVideos
-});
 
 exports.convertVideos = convertVideos;
 exports.deleteOne = deleteOne;

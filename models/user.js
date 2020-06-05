@@ -1,7 +1,7 @@
 // schema file for new documents added via mongoose. Authentication & hash password.
 
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
+let encryption = null;
 const uuidv4 = require('uuid/v4');
 
 // Basic user schema
@@ -65,7 +65,8 @@ UserSchema.statics.authenticate = function(email, password, callback) {
                 err.status = 401;
                 return callback(err);
             }
-            bcrypt.compare(password, user.password, function(error, result) {
+            encryption = require('../scripts/bcrypt/encryption.js'); // import bcrypt here as it causes errors when workers call this file to make db queuries
+            encryption.bcrypt.compare(password, user.password, function(error, result) {
                 if (result === true) {
                     return callback(null, user);
                 } else {
@@ -78,14 +79,15 @@ UserSchema.statics.authenticate = function(email, password, callback) {
 // hash password before saving to database
 UserSchema.pre('save', function(next) {
     // this refers to the object the user created in the signup form
-    let user = this;
-    bcrypt.hash(user.password, 10, function(err, hash) {
+    encryption = require('../scripts/bcrypt/encryption.js');
+    encryption.bcrypt.hash(this.password, 10, (err, hash) => {
         if (err) {
             return next(err);
         }
-        user.password = hash;
+        this.password = hash;
         next();
     });
+
 });
 
 

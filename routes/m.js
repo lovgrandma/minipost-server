@@ -3,7 +3,7 @@
 @author Jesse Thompson
 Handles calls to mongodb, user authentication, chat functionality, video upload and records etc
 */
-
+const cluster = require('cluster');
 const express = require('express');
 const router = express.Router();
 const util = require('util');
@@ -12,20 +12,21 @@ const Chat = require('../models/chat');
 const Video = require('../models/video');
 const processvideo = require('./processvideo.js')
 const uuidv4 = require('uuid/v4');
-const redis = require('../redis');
-const redisclient = redis.redisclient;
+const redisApp = require('../redis');
+const redisclient = redisApp.redisclient;
 const stringify = require('json-stringify-safe');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('ffmpeg');
 const streamifier = require('streamifier');
-const cluster = require('cluster');
 const cp = require('child_process');
 const CPUs = require('os').cpus().length;
-const workerpool = require('workerpool');
-const videopool = workerpool.pool(__dirname + '/processvideo.js', {maxWorkers: 7});
+const Bull = require('bull');
+const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 
-const supportedContainers = ["mov", "3gpp", "mp4", "avi", "flv", "webm", "mpegts", "wmv", "matroska"];
+videoQueue.process(function(job) {
+    return processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket);
+});
 
 module.exports = function(io) {
     // file upload
@@ -34,7 +35,6 @@ module.exports = function(io) {
     const multer = require('multer');
     aws.config.update(s3Cred.awsConfig);
     const s3 = new aws.S3();
-
     process.env.PUBLIC_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.public, 'utf8');
     process.env.PRIVATE_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.private , 'utf8');
     // Credentials for cloudFront cookie signing
@@ -79,6 +79,8 @@ module.exports = function(io) {
             let userDbObject = await User.findOne({ username: body.user }).lean();
             let currentlyProcessing = false;
             let room = "";
+            let userSocket = body.socket;
+            console.log(body);
             if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
                 for (video of userDbObject.videos) {
                     if (video) {
@@ -99,7 +101,6 @@ module.exports = function(io) {
             if (userDbObject && currentlyProcessing == false) {
                 process.then(async function (video) {
                     // If file is MOV, 3GPP, AVI, FLV, MPEG4, WebM or WMV continue, else send response download "Please upload video of type ..
-                    console.log(video.metadata);
                     // Video resolution, example 1080p
                     let resolution = video.metadata.video.resolution.h;
                     let container = video.metadata.video.container.toLowerCase();
@@ -109,7 +110,7 @@ module.exports = function(io) {
                         if (resolution >= 240) {
                             let ranOnce = false;
                             let l = 0;
-                            // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos()
+                            // Creates a unique uuid for the amazon objects and then converts using ffmpeg convertVideos() method
                             function createUniqueUuid() {
                                 let generatedUuid = uuidv4().split("-").join("");
                                 let checkExistingObject = s3.getObject({ Bucket: "minifs", Key: generatedUuid + "-240.mp4", Range: "bytes=0-9" }).promise();
@@ -155,12 +156,21 @@ module.exports = function(io) {
                                                     if (userObj) {
                                                         res.status(200).send({querystatus: "processbegin;" + room}); // Send room back to user so user can connect to socket
                                                         ranOnce = true;
-                                                        videopool.exec('convertVideos', [i, originalVideo, objUrls, generatedUuid, true, room, body, null])
-                                                            .then(function (result) {
-                                                                console.log("Video conversion result" + result);
-                                                            })
-//                                                        objUrls = await processvideo.convertVideos(i, originalVideo, objUrls, generatedUuid, true, room, body, io);
-//                                                        return objUrls;
+                                                        // Get socket id from post request
+                                                        // save socket in redis
+                                                        // send message to master
+                                                        // send message to socket id for updates
+
+                                                        const job = await videoQueue.add({
+                                                            i: i,
+                                                            originalVideo: originalVideo,
+                                                            objUrls: objUrls,
+                                                            generatedUuid: generatedUuid,
+                                                            encodeAudio: true,
+                                                            room: room,
+                                                            body: body,
+                                                            userSocket: userSocket
+                                                        });
                                                     } else {
                                                         if (!ranOnce) {
                                                             res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
@@ -1157,6 +1167,7 @@ module.exports = function(io) {
             })
         }
     }
+
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
         return login(req, res, next);
@@ -1230,7 +1241,7 @@ module.exports = function(io) {
     // If not friends, chat doesnt exist, then create chat make chat pending for other user
     // If not friends, chat exists, forward chat message to chat document, if chat in pending array take chat off pending, put into confirmed.
     router.post('/beginchat', (req, res, next) => {
-        return beginchatf(req, res, next);
+        return beginchat(req, res, next);
     });
 
 

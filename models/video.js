@@ -54,7 +54,6 @@ const VideoSchema = new mongoose.Schema({
 
 // Act on entered user data if necessary before being entered into mongodb
 VideoSchema.pre('save', function(next) {
-    console.log(this); // this refers to the object the user created in the signup form
     next();
 });
 

@@ -110,6 +110,6 @@ app.use(function(err, req, res, next) {
 
 const port = process.env.PORT || 5000;
 server.setTimeout(10*60*1000);
-server.listen(port, () => console.log(`Minireel server started on port ${port}`));
+server.listen(port, () => console.log(`Minipost server started on port ${port}`));
 
 module.exports = {io};
