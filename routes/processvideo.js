@@ -304,7 +304,7 @@ const deleteVideoArray = function(videos, original, room, delay) {
                 if (videos[i].path) {
                     if (typeof videos[i].path === 'string' || videos[i].path instanceof String) {
                         let object = videos[i].path;
-                        if (videos.length > 0) {
+                        if (videos.length > 0) { // Very crucial, can run into critical errors if this is not checked
                             fs.unlink(videos[i].path, (err) => {
                                 if (err) {
                                     console.log(err);
