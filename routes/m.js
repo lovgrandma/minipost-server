@@ -64,8 +64,20 @@ module.exports = function(io) {
         })
     });
 
-    videoQueue.process(async function(job) {
-        console.log(job);
+    videoQueue.clean(0, 'failed');
+    videoQueue.clean(0, 'completed');
+
+    videoQueue.process(async function(job, done) {
+        console.log(await videoQueue.getJobCounts());
+        videoQueue.clean(0, 'completed')
+        .then(() => {
+            videoQueue.clean(0, 'failed');
+        }).then(async () => {
+            setInterval(async () => {
+                console.log(await videoQueue.getJobCounts());
+            }, 30000);
+        })
+
         processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket, job);
     });
 
@@ -75,6 +87,11 @@ module.exports = function(io) {
 
     videoQueue.on('stalled', function(job){
         console.log("Video queue stalled");
+    })
+
+    videoQueue.on('completed', function(job, result) {
+        console.log("job " + job.id + " completed " + result);
+        job.remove();
     })
 
     const tellSocket = (progress) => {
@@ -194,6 +211,11 @@ module.exports = function(io) {
                                                             room: room,
                                                             body: body,
                                                             userSocket: userSocket
+                                                        }, {
+                                                            removeOnComplete: true,
+                                                            removeOnFail: true,
+                                                            timeout: 14400000,
+                                                            attempts: 2
                                                         });
                                                     } else {
                                                         if (!ranOnce) {
