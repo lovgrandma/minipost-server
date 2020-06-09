@@ -54,7 +54,7 @@ const store = new MongoDBStore(
 );
 
 let io = null;
-const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, socket) {
+const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, socket, job) {
     /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
                 */
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
@@ -65,9 +65,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
             if (encodeAudio) {
                 process.then(async function(audio) {
                     if (audioCodecs.indexOf(audio.metadata.audio.codec.toLowerCase()) >= 0) { // Determine if current audio codec is supported
-                        if (io) {
-                            io.to(room).emit('uploadUpdate', "converting audio file");
-                        }
+                        job.progress(room + ";converting audio file");
                         let rawPath = "temp/" + generatedUuid + "-audio" + "-raw" + "." + audioFormat;
                         audio.addCommand('-vn');
                         audio.addCommand('-c:a', "aac"); // Convert all audio to aac, ensure consistency of format
@@ -76,36 +74,29 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                             audio.addCommand('-ac', '6'); // If channels value is null or equal to 0, convert to surround sound
                         }
                         audio.save("./" + rawPath, async function (err, file) {
-                            let audioObj = {
-                                "path" : rawPath,
-                                "detail" : "aac"
-                            }
-                            objUrls.push(audioObj);
                             if (!err) {
                                 console.log('Audio file: ' + file);
-                                return convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body, socket);
+                                objUrls.push({
+                                    "path" : rawPath,
+                                    "detail" : "aac"
+                                });
+                                return convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                             } else {
                                 console.log(err);
                                 deleteVideoArray(objUrls, originalVideo, room, 100000);
-                                if (io) {
-                                    io.to(room).emit('uploadErr', "Something went wrong");
-                                }
+                                job.progress(room + ";something went wrong");
                                 return err;
                             }
                         });
                     } else {
                         deleteVideoArray(objUrls, originalVideo, room, 100000);
                         console.log("Audio codec not supported");
-                        if (io) {
-                            io.to(room).emit('uploadErr', "Audio codec not supported");
-                        }
+                        job.progress("audio codec not supported");
                     }
                 });
             } else {
                 process.then(async function (video) {
-                    if (io) {
-                        io.to(room).emit('uploadUpdate', "converting " + resolutions[i] + "p video");
-                    }
+                    job.progress(room + ";converting " + resolutions[i] + "p video");
                     let rawPath = "temp/" + generatedUuid + "-" + resolutions[i] + "-raw" + "." + format;
                     video.setVideoSize("?x" + resolutions[i], true, true).setDisableAudio();
                     video.addCommand('-vcodec', 'libx264');
@@ -118,20 +109,17 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                     video.addCommand('-tune', 'film');
                     video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
                     video.save("./" + rawPath, async function (err, file) {
-                        let videoObj = {
+                        objUrls.push({
                             "path" : rawPath,
                             "detail" : resolutions[i]
-                        };
-                        objUrls.push(videoObj);
+                        });
                         if (!err) {
                             console.log('Video file: ' + file);
-                            return convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, socket);
+                            return convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                         } else {
                             console.log(err);
                             deleteVideoArray(objUrls, originalVideo, room, 100000);
-                            if (io) {
-                                io.to(room).emit('uploadErr', "Conversion error");
-                            }
+                            job.progress(room + ";video conversion error");
                             return err;
                         }
                     });
@@ -140,21 +128,16 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
         } catch (e) {
             console.log("Error msg: " + e.msg);
             deleteVideoArray(objUrls, originalVideo, room, 100000);
-            if (io) {
-                io.to(room).emit('uploadErr', "Conversion error");
-            }
+            job.progress(room + ";conversion error");
             return e;
         }
     } else {
-        if (io) {
-            io.to(room).emit('uploadUpdate', "video conversion complete");
-        }
-        makeMpd(objUrls, originalVideo, room, body, generatedUuid, socket);
+        makeMpd(objUrls, originalVideo, room, body, generatedUuid, socket, job);
     }
     return objUrls;
 }
 
-const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid, socket) {
+const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid, socket, job) {
     console.log("Generating Mpd");
     const exec_options = {
         cwd: null,
@@ -195,9 +178,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         let data = cp.exec(command + " " + args, {maxBuffer: 1024 * 8000}, function(err, stdout, stderr) { // 8000kb max buffer
             if (err) {
                 console.log("Something went wrong, mpd was not created");
-                if (io) {
-                    io.to(room).emit('uploadErr', "Conversion error");
-                }
+                job.progress(room + ";something went wrong");
                 deleteVideoArray(objUrls, originalVideo, room, 12000);
             } else {
                 try {
@@ -207,21 +188,17 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
                             "detail" : "mpd"
                         };
                         objUrls.push(mpdObj);
-                        uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, socket);
+                        uploadAmazonObjects(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, socket, job);
                     } else {
                         console.log("Something went wrong, mpd was not created");
-                        if (io) {
-                            io.to(room).emit('uploadErr', "Conversion error");
-                        }
+                        job.progress(room + ";something went wrong");
                         delArr.push(...objUrls, ...rawObjUrls);
                         deleteVideoArray(delArray, originalVideo, room, 12000);
                     }
                 } catch (err) {
                     console.log(err);
                     console.log("Something went wrong, mpd was not created");
-                    if (io) {
-                        io.to(room).emit('uploadErr', "Conversion error");
-                    }
+                    job.progress(room + ";conversion error");
                     delArr.push(...objUrls, ...rawObjUrls);
                     deleteVideoArray(delArray, originalVideo, room, 12000);
                 }
@@ -230,27 +207,21 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
     } catch (err) {
         console.log(err);
         console.log("Something went wrong, mpd was not created");
-        if (io) {
-            io.to(room).emit('uploadErr', "Conversion error");
-        }
+        job.progress(room + ";conversion error");
         delArr.push(...objUrls, ...rawObjUrls);
         deleteVideoArray(delArray, originalVideo, room, 12000);
     }
 }
 
 // Uploads individual amazon objects in array to amazon
-const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, socket) {
+const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, generatedUuid, rawObjUrls, socket, job) {
     // The locations array will hold the location of the file once uploaded and "detail"
     // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
     // Use the locations array to build the dash mpd file
-    if (io) {
-        io.to(room).emit('uploadUpdate', "uploading content to server");
-    }
+    job.progress(room + ";sending converted video to our servers");
     let s3Objects = [];
     if (objUrls.length == 0) {
-        if (io) {
-            io.to(room).emit('uploadErr', "Something went wrong");
-        }
+        job.progress(room + ";something went wrong");
         deleteVideoArray(delArray, originalVideo, room, 12000);
     }
     let delArr = [];
@@ -268,7 +239,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                     if (i == objUrls.length-1) {
                         console.log("Upload to S3 Complete");
                         console.log(room);
-                        makeVideoRecord(s3Objects, body, generatedUuid, socket);
+                        makeVideoRecord(s3Objects, body, room, generatedUuid, socket, job);
                         delArr.push(...objUrls, ...rawObjUrls);
                         deleteVideoArray(delArr, originalVideo, room, 12000);
                         if (io) {
@@ -278,24 +249,20 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                 }
             } else {
                 console.log("Something went wrong, not all objects uploaded to s3");
-                if (io) {
-                    io.to(room).emit('uploadErr', "Something went wrong");
-                }
+                job.progress(room + ";something went wrong");
                 delArr.push(...objUrls, ...rawObjUrls);
                 deleteVideoArray(delArray, originalVideo, room, 12000);
             }
         } catch (err) {
             console.log("Something went wrong, not all objects uploaded to s3");
-            if (io) {
-                io.to(room).emit('uploadErr', "Something went wrong");
-            }
+            job.progress(room + ";something went wrong");
             delArr.push(...objUrls, ...rawObjUrls);
             deleteVideoArray(delArray, originalVideo, room, 12000);
         }
     }
 };
 
-const makeVideoRecord = async function(s3Objects, body, generatedUuid, socket) {
+const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, socket, job) {
     let objLocations = [];
     let mpdLoc = "";
     for (obj of s3Objects) {
@@ -320,10 +287,7 @@ const makeVideoRecord = async function(s3Objects, body, generatedUuid, socket) {
                 }
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo() }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
-                    console.log(socket + " final finish point processvideo");
-                    if (io) {
-                        io.to(room).emit('uploadUpdate', "video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
-                    }
+                    job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
                 }
             }
         }

@@ -215,6 +215,10 @@ exports = module.exports = function(io){
             if (!roomAdded) {
                 socket.join(data);
             }
+            setTimeout(() => {
+                console.log(socket.rooms);
+                console.log(data);
+            }, 500);
         });
 
         socket.on('typing', (data) => {

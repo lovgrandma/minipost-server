@@ -24,10 +24,6 @@ const CPUs = require('os').cpus().length;
 const Bull = require('bull');
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 
-videoQueue.process(function(job) {
-    return processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket);
-});
-
 module.exports = function(io) {
     // file upload
     const aws = require('aws-sdk');
@@ -68,6 +64,35 @@ module.exports = function(io) {
         })
     });
 
+    videoQueue.process(async function(job) {
+        console.log(job);
+        processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket, job);
+    });
+
+    videoQueue.on('error', function(error) {
+        console.log("Video queue err: " + error);
+    });
+
+    videoQueue.on('stalled', function(job){
+        console.log("Video queue stalled");
+    })
+
+    const tellSocket = (progress) => {
+        let socketRoomNum = "upl-" + progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1];
+        let progressMsg = progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[2];
+        let message = progressMsg;
+        if (progress.match(/([a-z0-9]*);([a-z0-9 ]*);([a-z0-9:]*)/)) {
+            message += (";" + progress.match(/([a-z0-9]*);([a-z0-9 ]*);([a-z0-9:\/.-]*)/)[3]);
+        }
+        console.log(socketRoomNum + " " + message);
+        io.sockets.to(socketRoomNum).emit("uploadUpdate", message);
+    }
+
+    videoQueue.on('progress', function(job, progress) {
+        tellSocket(progress);
+    });
+
+
     const prepareUpload = async (req, res, next) => {
         // Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file. Uses path to determine if viable for ffmpeg conversion
         let objUrls = [];
@@ -80,7 +105,6 @@ module.exports = function(io) {
             let currentlyProcessing = false;
             let room = "";
             let userSocket = body.socket;
-            console.log(body);
             if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
                 for (video of userDbObject.videos) {
                     if (video) {
