@@ -44,5 +44,8 @@
     "universal-cookie": "^3.0.4",
     "uuid": "^3.3.2",
     "workerpool": "^6.0.0"
+  },
+  "devDependencies": {
+    "bull-ui": "^1.2.3"
   }
 }

@@ -287,10 +287,6 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo() }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
                     job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
-                    setTimeout(() => {
-                        job.finished("Video successfully converted and uploaded");
-                        job.moveToCompleted("Video successfully converted and uploaded");
-                    }, 30000);
                 }
             }
         }
@@ -299,18 +295,25 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
 
 // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.
 const deleteVideoArray = function(videos, original, room, delay) {
+    console.log("Delete Array method running");
+    console.log(original);
+    console.log(videos);
     setTimeout(function() {
         for (let i = 0; i < videos.length; i++) {
             try {
                 if (videos[i].path) {
-                    let object = videos[i].path;
-                    fs.unlink(videos[i].path, (err) => {
-                        if (err) {
-                            console.log(err);
-                        } else {
-                            console.log(object + " deleted from temp storage");
+                    if (typeof videos[i].path === 'string' || videos[i].path instanceof String) {
+                        let object = videos[i].path;
+                        if (videos.length > 0) {
+                            fs.unlink(videos[i].path, (err) => {
+                                if (err) {
+                                    console.log(err);
+                                } else {
+                                    console.log(object + " deleted from temp storage");
+                                }
+                            });
                         }
-                    });
+                    }
                 }
             } catch (err) {
                 console.log(err);
@@ -318,17 +321,19 @@ const deleteVideoArray = function(videos, original, room, delay) {
         };
         try {
             if (original) {
-                fs.unlink(original, (err) => {
-                    if (err) {
-                        setTimeout((original) => {
-                            fs.unlink(original, (err) => {
-                                console.log("Original video deleted from temp storage on second try");
-                            });
-                        }, delay);
-                    } else {
-                        console.log("Original video deleted from temp storage");
-                    }
-                });
+                if (typeof original === 'string' || original instanceof String) {
+                    fs.unlink(original, (err) => {
+                        if (err) {
+                            setTimeout((original) => {
+                                fs.unlink(original, (err) => {
+                                    console.log("Original video deleted from temp storage on second try");
+                                });
+                            }, delay);
+                        } else {
+                            console.log("Original video deleted from temp storage");
+                        }
+                    });
+                }
             }
         } catch (err) {
             console.log(err);
@@ -338,15 +343,18 @@ const deleteVideoArray = function(videos, original, room, delay) {
 
 /* Deletes one file cleanly */
 const deleteOne = async (filePath) => {
+    console.log("delete one method running");
     try {
         if (filePath) {
-            fs.unlink(filePath, (err) => {
-                if (err) {
-                    throw err;
-                } else {
-                    console.log(filePath + " deleted");
-                }
-            });
+            if (typeof filePath === 'string' || filePath instanceof String) {
+                fs.unlink(filePath, (err) => {
+                    if (err) {
+                        throw err;
+                    } else {
+                        console.log(filePath + " deleted");
+                    }
+                });
+            }
         }
     } catch (err) {
         console.log(err);

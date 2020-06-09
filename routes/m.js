@@ -64,25 +64,51 @@ module.exports = function(io) {
         })
     });
 
-    videoQueue.clean(0, 'failed');
-    videoQueue.clean(0, 'completed');
-
     videoQueue.process(async function(job, done) {
         console.log(await videoQueue.getJobCounts());
         videoQueue.clean(0, 'completed')
-        .then(() => {
-            videoQueue.clean(0, 'failed');
-        }).then(async () => {
-            setInterval(async () => {
-                console.log(await videoQueue.getJobCounts());
-            }, 30000);
-        })
+        videoQueue.clean(0, 'failed');
+        videoQueue.on('progress', function(progress) {
+            if (progress._progress.match(/video ready/)) {
+                if (progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] == job.data.generatedUuid) {
+                    console.log(job.data.generatedUuid);
+                    console.log(progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] + " complete");
+                    done();
+                }
+            }
+        });
 
-        processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket, job);
+        return processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket, job);
     });
 
     videoQueue.on('error', function(error) {
         console.log("Video queue err: " + error);
+    });
+
+    videoQueue.on('waiting', function(jobId) {
+        setTimeout(() => {
+            videoQueue.getJob(jobId).then(function(job) {
+                try {
+                    job.getState().then(function(result) {
+                        if (result == 'waiting') {
+                            console.log(job);
+                            if (job.attemptsMade < 2 && job.attemptsMade > 0) {
+                                try {
+                                    job.retry();
+                                } catch (err) {
+                                    console.log(err);
+                                }
+                            } else if (job.attemptsMade > 0) {
+                                job.moveToFailed();
+                                job.discard();
+                            }
+                        }
+                    })
+                } catch (err) {
+                    console.log(err);
+                }
+            }, 50000);
+        })
     });
 
     videoQueue.on('stalled', function(job){
@@ -90,7 +116,7 @@ module.exports = function(io) {
     })
 
     videoQueue.on('completed', function(job, result) {
-        console.log("job " + job.id + " completed " + result);
+        console.log("job " + job.id + " completed ");
         job.remove();
     })
 
@@ -197,11 +223,6 @@ module.exports = function(io) {
                                                     if (userObj) {
                                                         res.status(200).send({querystatus: "processbegin;" + room}); // Send room back to user so user can connect to socket
                                                         ranOnce = true;
-                                                        // Get socket id from post request
-                                                        // save socket in redis
-                                                        // send message to master
-                                                        // send message to socket id for updates
-
                                                         const job = await videoQueue.add({
                                                             i: i,
                                                             originalVideo: originalVideo,
