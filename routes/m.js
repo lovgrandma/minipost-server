@@ -23,6 +23,17 @@ const cp = require('child_process');
 const CPUs = require('os').cpus().length;
 const Bull = require('bull');
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
+setInterval(async () => { // Cleans all completed and failed jobs every 5 minutes
+    videoQueue.clean(0, 'completed')
+    videoQueue.clean(0, 'failed');
+    console.log("Cleaning video queue");
+    console.log(await videoQueue.getJobCounts());
+}, 300000);
+
+//videoQueue.clean(0);
+//setTimeout(async () => {
+//    console.log(await videoQueue.getJobCounts());
+//}, 100);
 
 module.exports = function(io) {
     // file upload
@@ -64,14 +75,10 @@ module.exports = function(io) {
         })
     });
 
-    videoQueue.process(async function(job, done) {
-        console.log(await videoQueue.getJobCounts());
-        videoQueue.clean(0, 'completed')
-        videoQueue.clean(0, 'failed');
+    videoQueue.process(CPUs, async function(job, done) {
         videoQueue.on('progress', function(progress) {
             if (progress._progress.match(/video ready/)) {
                 if (progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] == job.data.generatedUuid) {
-                    console.log(job.data.generatedUuid);
                     console.log(progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] + " complete");
                     done();
                 }
@@ -91,7 +98,6 @@ module.exports = function(io) {
                 try {
                     job.getState().then(function(result) {
                         if (result == 'waiting') {
-                            console.log(job);
                             if (job.attemptsMade < 2 && job.attemptsMade > 0) {
                                 try {
                                     job.retry();
@@ -235,7 +241,7 @@ module.exports = function(io) {
                                                         }, {
                                                             removeOnComplete: true,
                                                             removeOnFail: true,
-                                                            timeout: 14400000,
+                                                            timeout: 7200000,
                                                             attempts: 2
                                                         });
                                                     } else {
@@ -277,6 +283,10 @@ module.exports = function(io) {
         } catch (e) {
             console.log(e);
         }
+    }
+
+    const publish = (req, res, end) => {
+        console.log(req.body);
     }
 
     // End of upload functionality
@@ -980,9 +990,9 @@ module.exports = function(io) {
                             if (now - videoCreationTime > 14400000) { // 4 hours
                                 console.log("more than 4 hours since video began transcoding");
                                 // It has taken too long to convert the video, it can be deleted. This ensures users db video stack is reset and user is not being asked to fill in detail about a video that will never finish transcoding
-                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}}, async function(err, result) {
-                                    // no video found
-                                });
+//                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}}, async function(err, result) {
+//                                    // no video found
+//                                });
                             } else {
                                 pendingVideo = true;
                                 res.json({ querystatus: video.id + ";processing"  });
@@ -1311,6 +1321,9 @@ module.exports = function(io) {
         return beginchat(req, res, next);
     });
 
+    router.post('/publish', (req, res, next) => {
+        return publish(req, res, next);
+    });
 
     // take chat id and append it to users in chat in the database.
 
@@ -1319,8 +1332,6 @@ module.exports = function(io) {
     // GET a users profile
 
     // GET a video
-
-    // POST & upload a video
     return router;
 }
 

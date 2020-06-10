@@ -65,7 +65,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
             if (encodeAudio) {
                 process.then(async function(audio) {
                     if (audioCodecs.indexOf(audio.metadata.audio.codec.toLowerCase()) >= 0) { // Determine if current audio codec is supported
-                        job.progress(room + ";converting audio file");
+                        job.progress(room + ";converting audio");
                         let rawPath = "temp/" + generatedUuid + "-audio" + "-raw" + "." + audioFormat;
                         audio.addCommand('-vn');
                         audio.addCommand('-c:a', "aac"); // Convert all audio to aac, ensure consistency of format
@@ -101,7 +101,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                     video.setVideoSize("?x" + resolutions[i], true, true).setDisableAudio();
                     video.addCommand('-vcodec', 'libx264');
                     if (video.metadata.video.codec == "mpeg2video") {
-                        video.addCommand('-preset', 'slow');
+                        video.addCommand('-preset', 'fast');
                     } else {
                         video.addCommand('-preset', 'faster');
                     }
@@ -218,7 +218,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
     // The locations array will hold the location of the file once uploaded and "detail"
     // Detail will tell the resolution if its a video, the language if its audio or language-s if its a subtitle
     // Use the locations array to build the dash mpd file
-    job.progress(room + ";sending converted video to our servers");
+    job.progress(room + ";sending converted files to our servers");
     let s3Objects = [];
     if (objUrls.length == 0) {
         job.progress(room + ";something went wrong");
@@ -240,6 +240,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                         console.log("Upload to S3 Complete");
                         makeVideoRecord(s3Objects, body, room, generatedUuid, socket, job);
                         delArr.push(...objUrls, ...rawObjUrls);
+                        job.moveToCompleted();
                         deleteVideoArray(delArr, originalVideo, room, 15000);
                         if (io) {
                             io.to(room).emit('uploadUpdate', "upload complete");
@@ -295,9 +296,6 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
 
 // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.
 const deleteVideoArray = function(videos, original, room, delay) {
-    console.log("Delete Array method running");
-    console.log(original);
-    console.log(videos);
     setTimeout(function() {
         for (let i = 0; i < videos.length; i++) {
             try {
@@ -343,7 +341,6 @@ const deleteVideoArray = function(videos, original, room, delay) {
 
 /* Deletes one file cleanly */
 const deleteOne = async (filePath) => {
-    console.log("delete one method running");
     try {
         if (filePath) {
             if (typeof filePath === 'string' || filePath instanceof String) {

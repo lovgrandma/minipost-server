@@ -209,17 +209,25 @@ exports = module.exports = function(io){
 
         socket.on('joinUploadSession', (data) => {
             let roomAdded = false;
-            for (room of Object.keys(socket.rooms)) {
-                if (room == data) roomAdded = true;
+            for (let i = 0; i < 3; i++) { // Try 3 times to add user to room
+                if (!checkForRoom(data)) {
+                    joinOneRoom(data);
+                } else {
+                    break;
+                }
             }
-            if (!roomAdded) {
-                socket.join(data);
-            }
-            setTimeout(() => {
-                console.log(socket.rooms);
-                console.log(data);
-            }, 500);
         });
+
+        let checkForRoom = (data) => { // Checks to see if specific room has been added
+            for (room of Object.keys(socket.rooms)) {
+                if (room == data) return true;
+            }
+            return false;
+        }
+
+        let joinOneRoom = (room) => { // Add user to specific room
+            socket.join(room);
+        }
 
         socket.on('typing', (data) => {
             updateType(socket, data);
