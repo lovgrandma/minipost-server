@@ -271,6 +271,17 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
             mpdLoc = obj.location.match(/.*(mpd).*/)[0];
         }
     }
+    let awaitingInfo = function(videoRecord) { // If title is present dont append anything past state, else append awaitinginfo
+        if (videoRecord) {
+            if (videoRecord.title.length == 0) {
+                return ";awaitinginfo";
+            } else {
+                return "";
+            }
+        } else {
+            return "";
+        }
+    }
     let videoRecord = await Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true });
     if (await videoRecord) {
         let mpd;
@@ -278,17 +289,11 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
         let userObj = await User.findOne({ username: body.user });
         for (let i = 0; i < userObj.videos.length; i++) {
             if (userObj.videos[i].id == generatedUuid) {
-                let awaitingInfo = function() {
-                    if (videoRecord.title.length == 0) {
-                        return ";awaitinginfo";
-                    } else {
-                        return "";
-                    }
-                }
-                let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo() }}}, { upsert: true, new: true});
+                let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
                     job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
                 }
+                break;
             }
         }
     }

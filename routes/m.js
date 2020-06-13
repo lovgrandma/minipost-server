@@ -30,11 +30,6 @@ setInterval(async () => { // Cleans all completed and failed jobs every 5 minute
     console.log(await videoQueue.getJobCounts());
 }, 300000);
 
-//videoQueue.clean(0);
-//setTimeout(async () => {
-//    console.log(await videoQueue.getJobCounts());
-//}, 100);
-
 module.exports = function(io) {
     // file upload
     const aws = require('aws-sdk');
@@ -80,7 +75,9 @@ module.exports = function(io) {
             if (progress._progress.match(/video ready/)) {
                 if (progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] == job.data.generatedUuid) {
                     console.log(progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] + " complete");
-                    done();
+                    setTimeout(() => {
+                        done();
+                    }, 15000);
                 }
             }
         });
@@ -89,7 +86,7 @@ module.exports = function(io) {
     });
 
     videoQueue.on('error', function(error) {
-        console.log("Video queue err: " + error);
+        console.log("Video queue" + error);
     });
 
     videoQueue.on('waiting', function(jobId) {
@@ -122,8 +119,9 @@ module.exports = function(io) {
     })
 
     videoQueue.on('completed', function(job, result) {
-        console.log("job " + job.id + " completed ");
-        job.remove();
+        if (job) {
+            job.remove();
+        }
     })
 
     const tellSocket = (progress) => {
@@ -285,8 +283,49 @@ module.exports = function(io) {
         }
     }
 
-    const publish = (req, res, end) => {
-        console.log(req.body);
+    const publish = async (req, res, end) => {
+        if (req.body.title && req.body.user && req.body.mpd) {
+            if (req.body.title.length > 0 && req.body.mpd.length > 0) {
+                let videoRecord = await Video.findOne({ _id: req.body.mpd }).lean();
+                let userRecord = await User.findOne({ username: req.body.user }).lean();
+                let desc = req.body.desc;
+                let nudity = req.body.nudity;
+                let tags = [...req.body.tags];
+                if (videoRecord && userRecord) {
+                    Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
+                        if (!err) {
+                            User.findOne({ username: req.body.user }, async function(err, user) {
+                                if (err) {
+                                    console.log("Error updating");
+                                }
+                                let foundOne = false;
+                                let updateValue;
+                                for (i = 0; i < user.videos.length; i++) {
+                                    if (user.videos[i].id == req.body.mpd) {
+                                        foundOne = true;
+                                        // If awaiting info (meaning processing is done) change state of video on user document
+                                        if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
+                                            updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
+                                            let newUser = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!foundOne) {
+                                    console.log("Error updating");
+                                }
+                            })
+                        } else {
+                            console.log(err);
+                        }
+                    }).lean();
+                } else {
+                    console.log("Error updating");
+                }
+            } else {
+                console.log("Error updating");
+            }
+        }
     }
 
     // End of upload functionality
@@ -402,7 +441,6 @@ module.exports = function(io) {
 
             User.findOne({username: req.body.username }, function(err, result) { // Search for entered user to see if user already exists
                 console.log("Attempt register, use exists already?: " + result);
-                console.log("Length of username: " + req.body.username.length);
                 if (req.body.username.length < 23 && req.body.username.length > 4) {
                     if (result == null) { // if null, user does not exist
                         User.findOne({email: req.body.regemail }, function(err, result) { // Search for entered email to see if email exists
@@ -426,7 +464,7 @@ module.exports = function(io) {
                                         }
                                         return res.json({querystatus: "loggedin"});
                                     }
-                                });
+                                }).lean();
                             } else {
                                 var err = new Error('Email already exists');
                                 err.status = 401;
