@@ -1028,9 +1028,7 @@ module.exports = function(io) {
                             if (now - videoCreationTime > 14400000) { // 4 hours
                                 console.log("more than 4 hours since video began transcoding");
                                 // It has taken too long to convert the video, it can be deleted. This ensures users db video stack is reset and user is not being asked to fill in detail about a video that will never finish transcoding
-//                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}}, async function(err, result) {
-//                                    // no video found
-//                                });
+                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}});
                             } else {
                                 pendingVideo = true;
                                 res.json({ querystatus: video.id + ";processing"  });

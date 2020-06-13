@@ -289,6 +289,7 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
         let userObj = await User.findOne({ username: body.user });
         for (let i = 0; i < userObj.videos.length; i++) {
             if (userObj.videos[i].id == generatedUuid) {
+                // Updates user record based on whether or not video document is waiting for info (has a title) or not.
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
                     job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
