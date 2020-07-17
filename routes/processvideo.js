@@ -306,8 +306,7 @@ const deleteVideoArray = function(videos, original, room, delay) {
         for (let i = 0; i < videos.length; i++) {
             try {
                 if (videos[i].path) {
-                    if (typeof videos[i].path === 'string' || videos[i].path instanceof String) {
-                        let object = videos[i].path;
+                    if (typeof videos[i].path === 'string') {
                         if (videos.length > 0) { // Very crucial, can run into critical errors if this is not checked
                             fs.unlink(videos[i].path, (err) => {
                                 if (err) {
@@ -325,14 +324,16 @@ const deleteVideoArray = function(videos, original, room, delay) {
         };
         try {
             if (original) {
-                if (typeof original === 'string' || original instanceof String) {
+                if (typeof original === 'string' && original !== undefined) {
                     fs.unlink(original, (err) => {
                         if (err) {
-                            setTimeout((original) => {
-                                fs.unlink(original, (err) => {
-                                    console.log("Original video deleted from temp storage on second try");
-                                });
-                            }, delay);
+                            if (typeof original === 'string' && original !== undefined) {
+                                setTimeout((original) => {
+                                    fs.unlink(original, (err) => {
+                                        console.log("Original video deleted from temp storage on second try");
+                                    });
+                                }, delay);
+                            }
                         } else {
                             console.log("Original video deleted from temp storage");
                         }
@@ -349,7 +350,7 @@ const deleteVideoArray = function(videos, original, room, delay) {
 const deleteOne = async (filePath) => {
     try {
         if (filePath) {
-            if (typeof filePath === 'string' || filePath instanceof String) {
+            if (typeof filePath === 'string') {
                 fs.unlink(filePath, (err) => {
                     if (err) {
                         throw err;

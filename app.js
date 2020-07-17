@@ -24,7 +24,9 @@ const users = require('./routes/m')(io);
 // parse incoming requests as json and make it accessible from req body property.
 app.use(bodyParser.json({
     type: function(req) {
-        return req.get('content-type').indexOf('multipart/form-data') !== 0;
+        if (req.get('content-type')) {
+            return req.get('content-type').indexOf('multipart/form-data') !== 0;
+        }
     },
 }));
 app.use(bodyParser.urlencoded({ extended: false }));

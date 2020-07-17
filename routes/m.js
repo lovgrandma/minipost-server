@@ -71,12 +71,14 @@ module.exports = function(io) {
     });
 
     videoQueue.process(CPUs, async function(job, done) {
-        videoQueue.on('progress', function(progress) {
+        videoQueue.on('progress', async function(progress) {
             if (progress._progress.match(/video ready/)) {
                 if (progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] == job.data.generatedUuid) {
                     console.log(progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] + " complete");
-                    setTimeout(() => {
+                    console.log(await videoQueue.getJobCounts());
+                    setTimeout(async () => {
                         done();
+                        console.log(await videoQueue.getJobCounts());
                     }, 15000);
                 }
             }
@@ -175,6 +177,7 @@ module.exports = function(io) {
                     // Video resolution, example 1080p
                     let resolution = video.metadata.video.resolution.h;
                     let container = video.metadata.video.container.toLowerCase();
+                    console.log(video.metadata.video);
                     if (processvideo.supportedContainers.indexOf(container) >= 0) {
                         // Run ffmpeg convert video to lower method as many times as there is a lower video resolution
                         // Determine what resolution to downgrade to
@@ -382,9 +385,7 @@ module.exports = function(io) {
                         maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
                         signed: true,
                     }
-                    if (req.cookies.loggedIn === undefined) {
-                        (res.cookie('loggedIn', user.username, [options]));
-                    }
+                    res.cookie('loggedIn', user.username, [options]);
                     return res.json({querystatus: "loggedin"});
                 }
             });
@@ -452,7 +453,6 @@ module.exports = function(io) {
                                         err.type = 'register error';
                                         return next(error);
                                     } else {
-                                        console.log(user);
                                         req.session.userId = user._id;
                                         req.session.username = user.username;
                                         let options = {
@@ -464,7 +464,7 @@ module.exports = function(io) {
                                         }
                                         return res.json({querystatus: "loggedin"});
                                     }
-                                }).lean();
+                                });
                             } else {
                                 var err = new Error('Email already exists');
                                 err.status = 401;
@@ -971,6 +971,9 @@ module.exports = function(io) {
         }
     }
 
+    // This method will filter through all the confirmed chats on a user document. It will search the chat database for each chat
+    // id and if there is data for that searched chat id add it to the chats array. It sets an attribute "pending"
+    // in order to differentiate between pending chats and confirmed chats on the front end when array is returned.
     const getconversationlogs = (req, res, next) => {
         User.findOne({username: req.body.username}, {chats: 1}, function(err, result) {
             if (err) throw err;
@@ -979,12 +982,14 @@ module.exports = function(io) {
             let chatdata = [];
             let chatsArray = [];
             async function getChats() {
-                if (result.chats[0]) {
-                    for (let i = 0; i < result.chats[0].confirmed.length; i++) {
-                        chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]}).lean();
-                        if (chatdata) {
-                            chatdata.pending = "false";
-                            chatsArray.push(chatdata);
+                if (result) { // If no result, there was an error in finding the user. Return empty array.
+                    if (result.chats[0]) {
+                        for (let i = 0; i < result.chats[0].confirmed.length; i++) {
+                            chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]}).lean();
+                            if (chatdata) {
+                                chatdata.pending = "false";
+                                chatsArray.push(chatdata);
+                            }
                         }
                     }
                 }
@@ -992,13 +997,15 @@ module.exports = function(io) {
             }
 
             async function getPendingChats() {
-                if (result.chats[1]) {
-                    for (let i = 0; i < result.chats[1].pending.length; i++) {
-                        let chatdata = new Map();
-                        chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
-                        if (chatdata) {
-                            chatdata.pending = "true";
-                            chatsArray.push(chatdata);
+                if (result) {
+                    if (result.chats[1]) {
+                        for (let i = 0; i < result.chats[1].pending.length; i++) {
+                            let chatdata = new Map();
+                            chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
+                            if (chatdata) {
+                                chatdata.pending = "true";
+                                chatsArray.push(chatdata);
+                            }
                         }
                     }
                 }
@@ -1007,8 +1014,8 @@ module.exports = function(io) {
 
             getChats().then(function(chatsArray) {
                 getPendingChats().then(function(chatsArray) {
-                    console.log(chatsArray + " final chat array");
-                    res.json(chatsArray);
+                    console.log("Chats Array: " + chatsArray);
+                    res.json(chatsArray); // List of chats for a user is sent to the user in json format.
                 });
             });
         }).lean();
@@ -1028,7 +1035,9 @@ module.exports = function(io) {
                             if (now - videoCreationTime > 14400000) { // 4 hours
                                 console.log("more than 4 hours since video began transcoding");
                                 // It has taken too long to convert the video, it can be deleted. This ensures users db video stack is reset and user is not being asked to fill in detail about a video that will never finish transcoding
-                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}});
+                                User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}}, function(err, result) {
+                                    console.log(result);
+                                }).lean();
                             } else {
                                 pendingVideo = true;
                                 res.json({ querystatus: video.id + ";processing"  });
@@ -1055,8 +1064,10 @@ module.exports = function(io) {
         User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
             if (err) throw err;
             let userfriendslist;
-            if (result.friends) {
-                userfriendslist = result.friends[0].confirmed;
+            if (result) {
+                if (result.friends) {
+                    userfriendslist = result.friends[0].confirmed;
+                }
             }
             res.json(userfriendslist);
         }).lean();
