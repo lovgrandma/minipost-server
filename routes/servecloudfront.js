@@ -7,4 +7,20 @@ const serveCloudfrontUrl = (mpd) => {
     return mpd;
 }
 
+// Policy for cloudfront cookies
+const policy = JSON.stringify({
+    Statement: [
+        {
+            Resource: 'http*://d3oyqm71scx51z.cloudfront.net/*',
+            Condition: {
+                DateLessThan: {
+                    'AWS:EpochTime':
+                    Math.floor(new Date().getTime() / 1000) + 60 * 60 * 1, // Current Time in UTC + time in seconds, (60 * 60 * 1 = 1 hour)
+                },
+            }
+        }
+    ]
+})
+
 exports.serveCloudfrontUrl = serveCloudfrontUrl;
+exports.policy = policy;

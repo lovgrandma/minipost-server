@@ -1,34 +1,31 @@
 /** Main Routes file m.js
-@version 1.0
+@version 0.3
 @author Jesse Thompson
 Handles calls to mongodb, user authentication, chat functionality, video upload and records etc
 */
-const cluster = require('cluster');
 const express = require('express');
 const router = express.Router();
 const util = require('util');
-const User = require('../models/user');
-const Chat = require('../models/chat');
-const Video = require('../models/video');
-const processvideo = require('./processvideo.js')
 const uuidv4 = require('uuid/v4');
-const redisApp = require('../redis');
-const redisclient = redisApp.redisclient;
-const stringify = require('json-stringify-safe');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('ffmpeg');
-const streamifier = require('streamifier');
 const cp = require('child_process');
 const CPUs = require('os').cpus().length;
 const Bull = require('bull');
+
+const redisApp = require('../redis');
+const redisclient = redisApp.redisclient;
+const User = require('../models/user');
+const Chat = require('../models/chat');
+const Video = require('../models/video');
+const processvideo = require('./processvideo.js');
+const maintenance = require('./queuemaintenance.js');
+const neo = require('./neo.js');
+const cloudfrontsettings = require('./servecloudfront');
+
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
-setInterval(async () => { // Cleans all completed and failed jobs every 5 minutes
-    videoQueue.clean(0, 'completed')
-    videoQueue.clean(0, 'failed');
-    console.log("Cleaning video queue");
-    console.log(await videoQueue.getJobCounts());
-}, 300000);
+maintenance.queueMaintenance(videoQueue);
 
 module.exports = function(io) {
     // file upload
@@ -44,21 +41,6 @@ module.exports = function(io) {
         process.env.PUBLIC_KEY,
         process.env.PRIVATE_KEY
     );
-
-    // Policy for cloudfront cookies
-    const policy = JSON.stringify({
-        Statement: [
-            {
-                Resource: 'http*://d3oyqm71scx51z.cloudfront.net/*',
-                Condition: {
-                    DateLessThan: {
-                        'AWS:EpochTime':
-                        Math.floor(new Date().getTime() / 1000) + 60 * 60 * 1, // Current Time in UTC + time in seconds, (60 * 60 * 1 = 1 hour)
-                    },
-                }
-            }
-        ]
-    })
 
     /* Uploads single video to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
@@ -126,10 +108,10 @@ module.exports = function(io) {
         }
     })
 
+    /* Sends progress of current upload and sends it to the client. Each progress parameter must include a room in following syntax: upl-##### and some progress message to be emitted to client */
     const tellSocket = (progress) => {
         let socketRoomNum = "upl-" + progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1];
-        let progressMsg = progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[2];
-        let message = progressMsg;
+        let message = progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[2];
         if (progress.match(/([a-z0-9]*);([a-z0-9 ]*);([a-z0-9:]*)/)) {
             message += (";" + progress.match(/([a-z0-9]*);([a-z0-9 ]*);([a-z0-9:\/.-]*)/)[3]);
         }
@@ -243,7 +225,7 @@ module.exports = function(io) {
                                                             removeOnComplete: true,
                                                             removeOnFail: true,
                                                             timeout: 7200000,
-                                                            attempts: 2
+                                                            attempts: 1
                                                         });
                                                     } else {
                                                         if (!ranOnce) {
@@ -333,6 +315,8 @@ module.exports = function(io) {
 
     // End of upload functionality
     /**************************************************************************************/
+
+    const policy = cloudfrontsettings.policy;
 
     // Set cloudfront cookies
     const setCloudCookies = (req, res) => {
@@ -1047,7 +1031,7 @@ module.exports = function(io) {
                             if (!pendingVideo) {
                                 let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
-                                res.json({ querystatus: serveCloudFrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
+                                res.json({ querystatus: cloudfrontsettings.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
                             }
                         }
                     }
@@ -1371,10 +1355,6 @@ module.exports = function(io) {
     router.post('/publish', (req, res, next) => {
         return publish(req, res, next);
     });
-
-    // take chat id and append it to users in chat in the database.
-
-    // Socket.io. Build socket opening route to make chat "live" (Seperate this into another function);
 
     // GET a users profile
 

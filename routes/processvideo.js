@@ -1,24 +1,29 @@
-const User = require('../models/user');
-const Chat = require('../models/chat');
-const Video = require('../models/video');
-const uuidv4 = require('uuid/v4');
-const redis = require('../redis');
-const redisclient = redis.redisclient;
+/** Worker for video upload processvideo.js
+@version 0.3
+@author Jesse Thompson
+Worker for processing video upload to S3 server and database recording
+*/
+
 const ffmpeg = require('ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
-const servecloudfront = require('./servecloudfront.js');
-
 const mongoose = require('mongoose');
 const session = require('express-session');
+const uuidv4 = require('uuid/v4');
 const MongoDBStore = require('connect-mongodb-session')(session);
+
+const User = require('../models/user');
+const Chat = require('../models/chat');
+const Video = require('../models/video');
+const redis = require('../redis');
+const redisclient = redis.redisclient;
+const servecloudfront = require('./servecloudfront.js');
 
 // file upload
 const aws = require('aws-sdk');
 const s3Cred = require('./api/s3credentials.js');
 const multer = require('multer');
-const multerS3 = require('multer-s3');
 aws.config.update(s3Cred.awsConfig);
 const s3 = new aws.S3();
 
@@ -91,7 +96,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                     } else {
                         deleteVideoArray(objUrls, originalVideo, room, 15000);
                         console.log("Audio codec not supported");
-                        job.progress("audio codec not supported");
+                        job.progress(room + "audio codec not supported");
                     }
                 });
             } else {
@@ -238,10 +243,8 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                 if (data) {
                     if (i == objUrls.length-1) {
                         console.log("Upload to S3 Complete");
-                        makeVideoRecord(s3Objects, body, room, generatedUuid, socket, job);
                         delArr.push(...objUrls, ...rawObjUrls);
-                        job.moveToCompleted();
-                        deleteVideoArray(delArr, originalVideo, room, 15000);
+                        makeVideoRecord(s3Objects, body, room, generatedUuid, socket, job, delArr, originalVideo);
                         if (io) {
                             io.to(room).emit('uploadUpdate', "upload complete");
                         }
@@ -262,7 +265,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
     }
 };
 
-const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, socket, job) {
+const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, socket, job, delArr, originalVideo) {
     let objLocations = [];
     let mpdLoc = "";
     for (obj of s3Objects) {
@@ -292,7 +295,8 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                 // Updates user record based on whether or not video document is waiting for info (has a title) or not.
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
-                    job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
+                    deleteJob(job, mpd);
+                    deleteVideoArray(delArr, originalVideo, room, 10000);
                 }
                 break;
             }
@@ -302,12 +306,16 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
 
 // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.
 const deleteVideoArray = function(videos, original, room, delay) {
-    setTimeout(function() {
+    setTimeout(() => {
         for (let i = 0; i < videos.length; i++) {
             try {
                 if (videos[i].path) {
                     if (typeof videos[i].path === 'string') {
                         if (videos.length > 0) { // Very crucial, can run into critical errors if this is not checked
+                            let object = videos[i].path;
+                            if (!object) {
+                                object = "null path";
+                            }
                             fs.unlink(videos[i].path, (err) => {
                                 if (err) {
                                     console.log(err);
@@ -344,6 +352,12 @@ const deleteVideoArray = function(videos, original, room, delay) {
             console.log(err);
         }
     }, delay);
+}
+
+/* Completes job and sends message to remove job from queue */
+const deleteJob = async (job, mpd) => {
+    job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
+    job.moveToCompleted();
 }
 
 /* Deletes one file cleanly */
