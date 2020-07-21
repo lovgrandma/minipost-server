@@ -22,7 +22,7 @@ const Video = require('../models/video');
 const processvideo = require('./processvideo.js');
 const maintenance = require('./queuemaintenance.js');
 const neo = require('./neo.js');
-const cloudfrontsettings = require('./servecloudfront');
+const cloudfrontconfig = require('./servecloudfront');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 maintenance.queueMaintenance(videoQueue);
@@ -316,7 +316,7 @@ module.exports = function(io) {
     // End of upload functionality
     /**************************************************************************************/
 
-    const policy = cloudfrontsettings.policy;
+    const policy = cloudfrontconfig.policy;
 
     // Set cloudfront cookies
     const setCloudCookies = (req, res) => {
@@ -1031,7 +1031,7 @@ module.exports = function(io) {
                             if (!pendingVideo) {
                                 let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
-                                res.json({ querystatus: cloudfrontsettings.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
+                                res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
                             }
                         }
                     }
