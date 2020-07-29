@@ -42,6 +42,8 @@ module.exports = function(io) {
         process.env.PRIVATE_KEY
     );
 
+    neo.returnFriends("sean");
+
     /* Uploads single video to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
         storage: multer.diskStorage({
@@ -511,32 +513,30 @@ module.exports = function(io) {
         } else {
             if(req.body.limit) { // This determines if there is a body length limit, meaning a request to see more users. This only occurs if user has already made a base search which is done in the else statement.
                 User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
-                    if (err) throw err;
-                    console.log("limitedsearch length: " + result.length + " / " + req.body.limit);
-                    let resultlength = result.length; // Save length before result array is spliced for accurate comparison later
-                    searchresults.push(result.splice(0,req.body.limit)); // Splices result into only 0 to limit, leaving rest in result.
-                    if (resultlength > req.body.limit) {
-                        searchresults.push({ moreusers: true }); // determines if there are more users to load if another request is made
-                    } else {
-                        searchresults.push({ moreusers: false });
+                    if (!err) {
+                        let resultlength = result.length; // Save length before result array is spliced for accurate comparison later
+                        searchresults.push(result.splice(0,req.body.limit)); // Splices result into only 0 to limit, leaving rest in result.
+                        console.log("resultlength: " + resultlength + " limit:" + req.body.limit);
+                        if (resultlength > req.body.limit) {
+                            searchresults.push({ moreusers: true }); // determines if there are more users to load if another request is made
+                        } else {
+                            searchresults.push({ moreusers: false });
+                        }
                     }
-                    if (err) throw err;
                     User.findOne({username: req.body.username }, {friends: 1}, function(err, result) { // Finds user and gets friends
-                        if (err) throw err;
-                        console.log(result);
-                        searchresults.push(result.friends[1].pending) // Pushes pending
-                        console.log(searchresults);
-                        res.json(searchresults);
+                        if (!err) {
+                            searchresults.push(result.friends[1].pending) // Pushes pending
+                            res.json(searchresults);
+                        }
                     }).lean();
                 }).lean();
             } else {
                 // the following makes a query to the database for users matching the user search input and only returns the username and id. This is the first query which limits the return search to 10 users.
                 User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
                     if (err) throw err;
-                    console.log("base search");
-                    console.log(result.length)
+                    const resultLength = result.length;
                     searchresults.push(result.splice(0,10));
-                    if (result.length > 10) { // If there are more users to load in the results
+                    if (resultLength > 10) { // If there are more users to load in the results
                         searchresults.push({ moreusers: true }); // Return 'more users' truthiness: There are more users to be loaded if the user wants to make another request
                     } else {
                         searchresults.push({ moreusers: false });
@@ -546,7 +546,6 @@ module.exports = function(io) {
                     User.findOne({username: req.body.username }, {friends: 1}, function(err, result) {
                         if (err) throw err;
                         searchresults.push(result.friends[1].pending)
-                        console.log(searchresults);
                         res.json(searchresults);
                         res.end();
                     }).lean();

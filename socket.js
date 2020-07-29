@@ -71,18 +71,22 @@ exports = module.exports = function(io){
 
     // Gets conversations from redis using socket rooms.
     // If redis call does not return a value, query mongo for chat based on room id. Set to redis key and query redis again
-    // Parse into json and then return. Resolve as a promise and emit to user
-    let fetchConvos = async (socket, data) => {
+    // Parse into json and then return. Resolve as a promise and emit rooms to user
+    let fetchConvos = async (socket, data) => { // data: String username of the user requesting their personal conversations
+
         // Take socket room ids and organize them into array to query redis and mongo
         result = mapper(socket.rooms);
         let roomsArr = [];
+
+        /* Filter to ensure random default socket room id is not used for chat record keeping */
         result.forEach((room, index) => {
             if (room.toString().length > 20 ) { // if length of room id > 20 therefore not the default socket room id
                 roomsArr.push(room);
             }
         });
 
-        let getChat = async (room) => { // Attempt to get room from redis, if null, create one from mongo query.
+        // Attempt to get room from redis, if null, create one from mongo query.
+        let getChat = async (room) => {
             if (redisclient) {
                 let temp = await redisclient.getAsync(room);
                 if (!temp) {
