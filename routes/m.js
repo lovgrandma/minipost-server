@@ -42,8 +42,6 @@ module.exports = function(io) {
         process.env.PRIVATE_KEY
     );
 
-    neo.checkFriends("sammy");
-
     /* Uploads single video to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
         storage: multer.diskStorage({
@@ -270,7 +268,8 @@ module.exports = function(io) {
         }
     }
 
-    const publish = async (req, res, end) => {
+
+    const publishVideo = async (req, res, end) => {
         if (req.body.title && req.body.user && req.body.mpd) {
             if (req.body.title.length > 0 && req.body.mpd.length > 0) {
                 let videoRecord = await Video.findOne({ _id: req.body.mpd }).lean();
@@ -280,26 +279,28 @@ module.exports = function(io) {
                 let tags = [...req.body.tags];
                 if (videoRecord && userRecord) {
                     Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
+                        neo.createOneVideo(req.body.user, req.body.mpd, req.body.title, desc, nudity, tags);
                         if (!err) {
                             User.findOne({ username: req.body.user }, async function(err, user) {
                                 if (err) {
                                     console.log("Error updating");
-                                }
-                                let foundOne = false;
-                                let updateValue;
-                                for (i = 0; i < user.videos.length; i++) {
-                                    if (user.videos[i].id == req.body.mpd) {
-                                        foundOne = true;
-                                        // If awaiting info (meaning processing is done) change state of video on user document
-                                        if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
-                                            updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
-                                            let newUser = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
-                                            break;
+                                } else {
+                                    let foundOne = false;
+                                    let updateValue;
+                                    for (i = 0; i < user.videos.length; i++) {
+                                        if (user.videos[i].id == req.body.mpd) {
+                                            foundOne = true;
+                                            // If awaiting info (meaning processing is done) change state of video on user document
+                                            if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
+                                                updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
+                                                let newUser = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
+                                                break;
+                                            }
                                         }
                                     }
-                                }
-                                if (!foundOne) {
-                                    console.log("Error updating");
+                                    if (!foundOne) {
+                                        console.log("Error updating");
+                                    }
                                 }
                             })
                         } else {
@@ -1324,6 +1325,21 @@ module.exports = function(io) {
         return getUserVideos(req, res, next);
     })
 
+    router.post('/serveVideos', async (req, res, next) => {
+        if (req.body.user) {
+            if (req.body.user.length > 0) {
+                let videoRecommendations = await neo.serveVideoRecommendations(req.body.user);
+                console.log(videoRecommendations);
+                if (videoRecommendations) {
+                    return res.json(videoRecommendations);
+                } else {
+                    return res.json({querystatus: 'error retrieving video recommendations'});
+                }
+            }
+        }
+        return res.json({querystatus: 'empty username in video recommendation query'});
+    });
+
     router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
         return prepareUpload(req, res, next);
     });
@@ -1351,8 +1367,8 @@ module.exports = function(io) {
         return beginchat(req, res, next);
     });
 
-    router.post('/publish', (req, res, next) => {
-        return publish(req, res, next);
+    router.post('/publishVideo', (req, res, next) => {
+        return publishVideo(req, res, next);
     });
 
     // GET a users profile

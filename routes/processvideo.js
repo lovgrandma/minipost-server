@@ -295,7 +295,7 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                 // Updates user record based on whether or not video document is waiting for info (has a title) or not.
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
-                    deleteJob(job, mpd);
+                    deleteJob(job, mpd, room);
                     deleteVideoArray(delArr, originalVideo, room, 10000);
                 }
                 break;
@@ -355,7 +355,7 @@ const deleteVideoArray = function(videos, original, room, delay) {
 }
 
 /* Completes job and sends message to remove job from queue */
-const deleteJob = async (job, mpd) => {
+const deleteJob = async (job, mpd, room) => {
     job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
     job.moveToCompleted();
 }
