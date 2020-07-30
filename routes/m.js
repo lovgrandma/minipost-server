@@ -42,7 +42,7 @@ module.exports = function(io) {
         process.env.PRIVATE_KEY
     );
 
-    neo.returnFriends("sean");
+    neo.checkFriends("sammy");
 
     /* Uploads single video to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
