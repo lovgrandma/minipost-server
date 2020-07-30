@@ -1,5 +1,5 @@
 /** Neo4j file neo.js
-@version 0.1
+@version 0.2
 @author Jesse Thompson
 Interfaces with neo4j architecture, updates and appends relationships with relevant data and calls recommendation algorithms
 */
@@ -47,61 +47,58 @@ const returnFriends = async () => {
 
 /* Determines if friends listed in user document in mongodb are analogous to users' neo4j friend relationship edges */
 const checkFriends = async (user) => {
-    if (user && typeof user === 'string') {
-        if (user.length > 0) {
-            let userDoc = await User.findOne({username: user}).lean();
-            if (userDoc) {
-                const mongoFriends = userDoc.friends[0].confirmed;
-                const session = driver.session();
-                checkUserExists(user)
-                .then(async(result) => {
-                    if (!result) { // If user does not exist, add single new user to graph database
-                        return await addOneUser(user);
-                    }
-                    return false;
-                })
-                .then(async (result) => {
-                    const query = "match (a:Person {name: $username })-[r:FRIENDS]-(b) return b";
-                    session.run(query, {username: user })
-                    .then(async (result) => {
-                        session.close();
-                        let graphRecords = result.records;
-                        if (result.records.length > 0) {
-                            let temp = [];
-                            graphRecords.forEach((record) => {
-                                temp.push(record._fields[0].properties.name.toString());
-                            })
-                            graphRecords = temp;
+    try {
+        if (user && typeof user === 'string') {
+            if (user.length > 0) {
+                let userDoc = await User.findOne({username: user}).lean();
+                if (userDoc) {
+                    const mongoFriends = userDoc.friends[0].confirmed;
+                    const session = driver.session();
+                    checkUserExists(user)
+                        .then(async(result) => {
+                        if (!result) { // If user does not exist, add single new user to graph database
+                            return await addOneUser(user);
                         }
-                        console.log(graphRecords);
-                        if (graphRecords) {
-                            /* If user friends listed in mongoDb user document are not present in graph database, the following first ensures users exist as individual documents in mongoDb */
-                            let promiseCheckFriends = mongoFriends.map(mongoRecord => {
-                                return new Promise( async (resolve, reject) => {
-                                    if (graphRecords.indexOf(mongoRecord.username) < 0) {
-                                        console.log(mongoRecord.username + " not found in graph records friends");
-                                        let otherUser = await User.findOne({username: mongoRecord.username}).lean();
-                                        if (otherUser) {
-                                            let buildUser = await checkUserExists(mongoRecord.username)
-                                            .then(async (result) => {
-                                                if (!result) {
-                                                    resolve(await addOneUser(mongoRecord.username));
-                                                }
-                                                resolve(true);
-                                            })
-                                        }
-                                    } else {
-                                        resolve(true);
-                                    }
+                        return;
+                    })
+                        .then(async (result) => {
+                        const query = "match (a:Person {name: $username })-[r:FRIENDS]-(b) return b";
+                        session.run(query, {username: user })
+                            .then(async (result) => {
+                            session.close();
+                            let graphRecords = result.records;
+                            if (result.records.length > 0) {
+                                let temp = [];
+                                graphRecords.forEach((record) => {
+                                    temp.push(record._fields[0].properties.name.toString());
                                 })
-                            })
+                                graphRecords = temp;
+                            }
+                            if (graphRecords) {
+                                /* If user friends listed in mongoDb user document are not present in graph database, the following first ensures users exist as individual documents in mongoDb */
+                                let promiseCheckFriends = mongoFriends.map(mongoRecord => {
+                                    return new Promise( async (resolve, reject) => {
+                                        if (graphRecords.indexOf(mongoRecord.username) < 0) { // Check if mongoRecord string present in graph records array
+                                            let otherUser = await User.findOne({username: mongoRecord.username}).lean();
+                                            if (otherUser) {
+                                                /* Add user to graph db if user doesn't exist */
+                                                checkUserExists(mongoRecord.username)
+                                                    .then(async (result) => {
+                                                    if (!result) {
+                                                        resolve(await addOneUser(mongoRecord.username));
+                                                    }
+                                                    resolve(true);
+                                                })
+                                            }
+                                        } else {
+                                            resolve(true);
+                                        }
+                                    })
+                                })
 
-                            /* Determine if mongoFriends array is the same as graphRecord friends array, avoids running unnecessary i/o calls on mongodb and neo4j */
-                            if (!utility.deepEquals(mongoFriends, graphRecords)) {
-                                await Promise.all(promiseCheckFriends).then( async (result) => {
-                                    console.log(result);
-                                    console.log("3");
-                                    setTimeout(async () => {
+                                /* Determine if mongoFriends array is the same as graphRecord friends array, avoids running unnecessary i/o calls on mongodb and neo4j */
+                                if (!utility.deepEquals(mongoFriends, graphRecords)) {
+                                    await Promise.all(promiseCheckFriends).then( async (result) => {
                                         const friendsAddedConfirmation = await Promise.all(mongoFriends.map(mongoRecord => {
                                             return new Promise (async (resolve, reject) => {
                                                 if (graphRecords.indexOf(mongoRecord.username <= 0)) {
@@ -110,27 +107,27 @@ const checkFriends = async (user) => {
                                                 resolve(true);
                                             })
                                         }));
-                                        console.log(friendsAddedConfirmation);
-                                    }, 500);
-                                });
+                                    });
+                                }
+                            } else {
+                                return false;
                             }
-                        } else {
-                            return false;
-                        }
 
+                        })
                     })
-                })
-            } else {
-                return false;
+                } else {
+                    return false;
+                }
             }
         }
+        return false;
+    } catch (err) {
+        console.log("Graphdb check users method failed to complete");
     }
-    return false;
 }
 
 /* Check if individual mongo user is represented in graph database */
 const checkUserExists = async (user) => {
-    console.log("1 " + user);
     if (user && typeof user === 'string') {
         if (user.length > 0) {
             let session = driver.session();
@@ -162,7 +159,6 @@ const addOneUser = async (user) => {
             session.close();
             if (result) {
                 if (result.records[0]) {
-                    console.log(result.records[0]._fields);
                     return true;
                 }
             }
