@@ -1,4 +1,9 @@
-/* Original code for deepEquals, arraysEqual, objectsEqual, mapsEqual typedArraysEqual from stackoverflow user @ninjagecko
+/** Utility file utility.js
+@version 0.1
+@author Jesse Thompson, @ninjagecko
+Includes helper utility functions that abstract more complicated functionality for seemingly mundane operations
+
+Original code for deepEquals, arraysEqual, objectsEqual, mapsEqual typedArraysEqual from stackoverflow user @ninjagecko
 https://stackoverflow.com/questions/3115982/how-to-check-if-two-arrays-are-equal-with-javascript */
 
 function deepEquals(a,b) {

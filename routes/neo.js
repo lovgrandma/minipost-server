@@ -47,10 +47,14 @@ const returnFriends = async () => {
 
 /* Serves video recommendations to client
 Serving video recommendations based on similar people and friends requires for friends of a user to be accurately represented in the database. Running checkFriends before running any recommendation logic ensures that users friends are updated in the database
+
+This method should return up to 100 video mpds, titles, authors, descriptions, date, views and thumbnail locations every time it runs.
 */
 const serveVideoRecommendations = async (user) => {
-    const videoArray = checkFriends(user).then(() => {
-        console.log("preliminary stuff done");
+    const videoArray = checkFriends(user).then((result) => {
+        if (result) {
+            console.log("preliminary stuff done");
+        }
         return "good stuff";
     })
     return videoArray;
@@ -161,7 +165,6 @@ const checkFriends = async (user) => {
                             })
                             return await checkFriendMatches;
                         })
-                        console.log(completeUserGraphDbCheck);
                         return completeUserGraphDbCheck;
                 } else {
                     return false;
@@ -288,10 +291,9 @@ const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags)
                 }
                 query += " }) return a";
                 const videoRecordCreated = await session.run(query, params)
-                    .then(async(result) => {
-                        console.log("Video created");
-                        return result;
-                    })
+                if (videoRecordCreated) {
+                    console.log("video created");
+                }
                 return videoRecordCreated;
             } else {
                 let query = "match (a:Video { mpd: $mpd }) set a += { title: $title";
@@ -313,10 +315,9 @@ const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags)
                 }
                 query += " } return a";
                 const videoRecordUpdated = await session.run(query, params)
-                    .then(async(result) => {
-                        console.log("Video updated");
-                        return result;
-                    })
+                if (videoRecordUpdated) {
+                    console.log("video updated");
+                }
                 return videoRecordUpdated;
             }
         })
