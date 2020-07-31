@@ -45,13 +45,47 @@ const returnFriends = async () => {
     }
 }
 
-/* Serves video recommendations to client */
+/* Serves video recommendations to client
+Serving video recommendations based on similar people and friends requires for friends of a user to be accurately represented in the database. Running checkFriends before running any recommendation logic ensures that users friends are updated in the database
+*/
 const serveVideoRecommendations = async (user) => {
     const videoArray = checkFriends(user).then(() => {
         console.log("preliminary stuff done");
         return "good stuff";
     })
     return videoArray;
+}
+
+/* This is the fallback method for serving video recommendations. This method will in chronological order:
+1. Find random videos with highest view counts that user has not watched in 6 months uploaded in last hour
+2. "" in last 24 hours
+3. "" in last week
+4. "" in last month
+5. "" in last 6 months
+6. "" in last year
+7. "" in last 5 years
+This is a fallback method incase recommendation system cannot find enough unique high affinity videos user has not watched in 6 months
+*/
+const serveRandomTrendingVideos = async (user) => {
+
+}
+
+/* This is the second fallback method. It recommends videos user has not watched in 6 months based on what friends and friends of friends have watched */
+const serveFriendsVideos = async (user) => {
+
+}
+
+/* This is the ideal method of video recommendation. It recommends videos based on alike users across the database.
+This method will in chronological order:
+1. Find high affinity videos user has not watched in 6 months of users with a 90% affinity
+a. uploaded in last 24 hours, b. uploaded in last week, c. uploaded in last month, d. uploaded in last 6 months, e. uploaded in last year, f. uploaded in last 5 years
+2. "" with a 80% affinity a, b, c, d, e, f
+3. "" with a 70% affinity a, b, c, d, e, f
+4. "" with a 60% affinity a, b, c, d, e, f
+5. "" with a 50% affinity a, b, c, d, e, f
+*/
+const serveCollaborativeFilterVideos = async (user) => {
+
 }
 
 /* Determines if friends listed in user document in mongodb are analogous to users' neo4j friend relationship edges */
