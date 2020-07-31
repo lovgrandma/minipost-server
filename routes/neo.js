@@ -137,6 +137,7 @@ const checkFriends = async (user) => {
         return false;
     } catch (err) {
         console.log("Graphdb check users method failed to complete");
+        return false;
     }
 }
 
@@ -218,10 +219,10 @@ const mergeOneFriendEdge = async (user, to) => {
     return friendEdgeAdded;
 }
 
-const createOneVideo = async (user, mpd, title, description, nudity, tags) => {
-    console.log(user, mpd, title, description, nudity, tags);
+/* Creates or updates one video record in graph db */
+const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags) => {
     if (user && mpd) {
-        checkUserExists(user)
+        let videoCreateProcessComplete = checkUserExists(user)
         .then(async (result) => {
             if (!result) {
                 return await createOneUser(user)
@@ -231,16 +232,36 @@ const createOneVideo = async (user, mpd, title, description, nudity, tags) => {
             return await checkVideoExists(mpd);
         })
         .then(async (result) => {
+            session = driver.session();
+            /* If result is null, create new video else update existing video in graph db */
             if (!result) {
-                session = driver.session();
-                let query = "create (a:Video { mpd: $mpd, author: $author";
-                let params = { mpd: mpd, author: user }
-                if (title) {
-                    if (title.length > 0) {
-                        query += ",title: $title";
-                        params.title = title;
+                let query = "create (a:Video { mpd: $mpd, author: $author, authorUuid: $uuid, title: $title";
+                let params = { mpd: mpd, author: user, uuid: uuid, title: title };
+                if (description) {
+                    if (description.length > 0) {
+                        query += ", description: $description";
+                        params.description = description;
                     }
                 }
+                if (nudity) {
+                    query += ", nudity: true";
+                } else {
+                    query += ", nudity: false";
+                }
+                if (tags) {
+                    query += ", tags: $tags";
+                    params.tags = tags;
+                }
+                query += " }) return a";
+                const videoRecordCreated = await session.run(query, params)
+                    .then(async(result) => {
+                        console.log("Video created");
+                        return result;
+                    })
+                return videoRecordCreated;
+            } else {
+                let query = "match (a:Video { mpd: $mpd }) set a += { title: $title";
+                let params = { mpd: mpd, author: user, uuid: uuid, title: title };
                 if (description) {
                     if (description.length > 0) {
                         query += ",description: $description";
@@ -248,22 +269,24 @@ const createOneVideo = async (user, mpd, title, description, nudity, tags) => {
                     }
                 }
                 if (nudity) {
-                    query += ",nudity: true";
+                    query += ", nudity: true";
                 } else {
-                    query += ",nudity: false";
+                    query += ", nudity: false";
                 }
                 if (tags) {
-                    query += ",tags: $tags";
+                    query += ", tags: $tags";
                     params.tags = tags;
                 }
-                query += " }) return a";
-                const videoCreated = await session.run(query, params)
-                    .then(async() => {
-                        console.log("Video created");
+                query += " } return a";
+                const videoRecordUpdated = await session.run(query, params)
+                    .then(async(result) => {
+                        console.log("Video updated");
+                        return result;
                     })
-                console.log(videoCreated);
+                return videoRecordUpdated;
             }
         })
+        return videoCreateProcessComplete;
     }
 }
 

@@ -268,7 +268,7 @@ module.exports = function(io) {
         }
     }
 
-
+    /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db */
     const publishVideo = async (req, res, end) => {
         if (req.body.title && req.body.user && req.body.mpd) {
             if (req.body.title.length > 0 && req.body.mpd.length > 0) {
@@ -279,7 +279,7 @@ module.exports = function(io) {
                 let tags = [...req.body.tags];
                 if (videoRecord && userRecord) {
                     Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
-                        neo.createOneVideo(req.body.user, req.body.mpd, req.body.title, desc, nudity, tags);
+                        neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags);
                         if (!err) {
                             User.findOne({ username: req.body.user }, async function(err, user) {
                                 if (err) {
