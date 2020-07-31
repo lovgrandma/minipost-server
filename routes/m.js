@@ -279,7 +279,8 @@ module.exports = function(io) {
                 let tags = [...req.body.tags];
                 if (videoRecord && userRecord) {
                     Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
-                        neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags);
+                        let userUpdated;
+                        let graphRecordUpdated = neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags);
                         if (!err) {
                             User.findOne({ username: req.body.user }, async function(err, user) {
                                 if (err) {
@@ -288,18 +289,21 @@ module.exports = function(io) {
                                     let foundOne = false;
                                     let updateValue;
                                     for (i = 0; i < user.videos.length; i++) {
-                                        if (user.videos[i].id == req.body.mpd) {
+                                        if (user.videos[i].id == req.body.mpd) { // Check if video in user document matches mpd of video user wants to update
                                             foundOne = true;
                                             // If awaiting info (meaning processing is done) change state of video on user document
                                             if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
                                                 updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
-                                                let newUser = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
+                                                userUpdated = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
                                                 break;
                                             }
                                         }
                                     }
                                     if (!foundOne) {
                                         console.log("Error updating");
+                                    }
+                                    if (graphRecordUpdated || userUpdated) {
+                                        res.json({ querystatus: "Record published/updated" });
                                     }
                                 }
                             })

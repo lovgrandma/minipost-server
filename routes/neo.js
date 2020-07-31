@@ -291,9 +291,6 @@ const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags)
                 }
                 query += " }) return a";
                 const videoRecordCreated = await session.run(query, params)
-                if (videoRecordCreated) {
-                    console.log("video created");
-                }
                 return videoRecordCreated;
             } else {
                 let query = "match (a:Video { mpd: $mpd }) set a += { title: $title";
@@ -315,9 +312,6 @@ const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags)
                 }
                 query += " } return a";
                 const videoRecordUpdated = await session.run(query, params)
-                if (videoRecordUpdated) {
-                    console.log("video updated");
-                }
                 return videoRecordUpdated;
             }
         })
