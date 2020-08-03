@@ -21,7 +21,7 @@ const returnFriends = async () => {
     const session = driver.session();
     try {
         const query = "match (n) return n";
-        /* Await result if you wish to use result to make another query. This avoids pyramid callback function style programming */
+        /* Await result if you want to use result to make another query. This avoids pyramid callback function style programming */
         const result = await session.writeTransaction
         (tx => tx.run(query)
             .then((result) => {
@@ -51,12 +51,20 @@ Serving video recommendations based on similar people and friends requires for f
 This method should return up to 100 video mpds, titles, authors, descriptions, date, views and thumbnail locations every time it runs.
 */
 const serveVideoRecommendations = async (user) => {
-    const videoArray = checkFriends(user).then((result) => {
-        if (result) {
-            console.log("preliminary stuff done");
+    let videoArray = [];
+    if (user) {
+        if (user.length) {
+            videoArray = checkFriends(user).then((result) => {
+                if (result) {
+                    console.log("preliminary stuff done");
+                }
+                return true;
+            })
+            .then( async (result) => {
+                return await serveRandomTrendingVideos(user);
+            });
         }
-        return "good stuff";
-    })
+    }
     return videoArray;
 }
 
@@ -71,7 +79,24 @@ const serveVideoRecommendations = async (user) => {
 This is a fallback method incase recommendation system cannot find enough unique high affinity videos user has not watched in 6 months
 */
 const serveRandomTrendingVideos = async (user) => {
-
+    console.log("Serve random trending videos " + user);
+    const session = driver.session();
+    const query = "match (a:Video) with a order by a.views desc return a";
+    let getHighestTrending = session.run(query)
+        .then(async (result) => {
+            session.close();
+            let graphRecords = result.records;
+            graphRecords.forEach((record, i) => {
+                let views = record._fields[0].properties.views.toNumber();
+                graphRecords[i]._fields[0].properties.views = views;
+            });
+            if (graphRecords) {
+                return graphRecords;
+            } else {
+                return false;
+            }
+        })
+    return getHighestTrending;
 }
 
 /* This is the second fallback method. It recommends videos user has not watched in 6 months based on what friends and friends of friends have watched */
@@ -128,7 +153,7 @@ const checkFriends = async (user) => {
                                             if (graphRecords.indexOf(mongoRecord.username) < 0) { // Check if mongoRecord string present in graph records array
                                                 let otherUser = await User.findOne({username: mongoRecord.username}).lean();
                                                 if (otherUser) {
-                                                    /* Add user to graph db if user doesn't exist */
+                                                    /* Add user to graph db if user exists in mongo but not present in graph db */
                                                     checkUserExists(mongoRecord.username)
                                                         .then(async (result) => {
                                                         if (!result) {
@@ -136,6 +161,9 @@ const checkFriends = async (user) => {
                                                         }
                                                         resolve(true);
                                                     })
+                                                } else {
+                                                    mongoFriends.filter(record => record !== mongoRecord); // Untested. Should delete record from mongoFriends array since user was not found in mongoDb.
+                                                    resolve(true);
                                                 }
                                             } else {
                                                 resolve(true);
@@ -148,7 +176,7 @@ const checkFriends = async (user) => {
                                         let checkAndAddFriends = await Promise.all(promiseCheckFriends).then( async (result) => {
                                             const checkFriendsAdded= await Promise.all(mongoFriends.map(mongoRecord => {
                                                 return new Promise (async (resolve, reject) => {
-                                                    if (graphRecords.indexOf(mongoRecord.username <= 0)) {
+                                                    if (graphRecords.indexOf(mongoRecord.username < 0)) {
                                                         resolve(await mergeOneFriendEdge(user, mongoRecord.username));
                                                     }
                                                     resolve(true);
@@ -256,8 +284,10 @@ const mergeOneFriendEdge = async (user, to) => {
     return friendEdgeAdded;
 }
 
-/* Creates or updates one video record in graph db */
-const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags) => {
+/** Creates or updates one video record in graph db
+Requires user, users uuid and mpd. Other methods must be empty string or in tags case must be empty array.
+*/
+const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate) => {
     if (user && mpd) {
         let videoCreateProcessComplete = checkUserExists(user)
         .then(async (result) => {
@@ -272,42 +302,43 @@ const createOneVideo = async (user, uuid, mpd, title, description, nudity, tags)
             session = driver.session();
             /* If result is null, create new video else update existing video in graph db */
             if (!result) {
-                let query = "create (a:Video { mpd: $mpd, author: $author, authorUuid: $uuid, title: $title";
-                let params = { mpd: mpd, author: user, uuid: uuid, title: title };
-                if (description) {
-                    if (description.length > 0) {
-                        query += ", description: $description";
-                        params.description = description;
-                    }
-                }
-                if (nudity) {
-                    query += ", nudity: true";
-                } else {
-                    query += ", nudity: false";
-                }
-                if (tags) {
-                    query += ", tags: $tags";
-                    params.tags = tags;
-                }
-                query += " }) return a";
+                let query = "create (a:Video { mpd: $mpd, author: $author, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0 }) return a";
+                let params = { mpd: mpd, author: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags };
                 const videoRecordCreated = await session.run(query, params)
                 return videoRecordCreated;
             } else {
-                let query = "match (a:Video { mpd: $mpd }) set a += { title: $title";
-                let params = { mpd: mpd, author: user, uuid: uuid, title: title };
-                if (description) {
-                    if (description.length > 0) {
-                        query += ",description: $description";
-                        params.description = description;
+                let query = "match (a:Video { mpd: $mpd }) set a += { ";
+                let params = { mpd: mpd, author: user, userUuid: userUuid, title: title };
+                let addedOne = 0;
+                if (title) {
+                    if (title.length > 0) {
+                        query += "title: $title";
+                        params.title = title;
+                        addedOne++;
                     }
                 }
-                if (nudity) {
-                    query += ", nudity: true";
-                } else {
-                    query += ", nudity: false";
+                addedOne > 0 ? query += ", " : null;
+                addedOne = 0;
+                if (description) {
+                    if (description.length > 0) {
+                        query += "description: $description";
+                        params.description = description;
+                        addedOne++;
+                    }
                 }
+                addedOne > 0 ? query += ", " : null;
+                addedOne = 0;
+                if (nudity) {
+                    query += "nudity: true";
+                    addedOne++;
+                } else {
+                    query += "nudity: false";
+                    addedOne++;
+                }
+                addedOne > 0 ? query += ", " : null;
+                addedOne = 0;
                 if (tags) {
-                    query += ", tags: $tags";
+                    query += "tags: $tags";
                     params.tags = tags;
                 }
                 query += " } return a";

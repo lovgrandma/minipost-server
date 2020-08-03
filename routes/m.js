@@ -75,6 +75,7 @@ module.exports = function(io) {
 
     videoQueue.on('waiting', function(jobId) {
         setTimeout(() => {
+            console.log("waiting " + jobId);
             videoQueue.getJob(jobId).then(function(job) {
                 try {
                     job.getState().then(function(result) {
@@ -193,6 +194,7 @@ module.exports = function(io) {
                                                 let videoData = {
                                                     _id: generatedUuid,
                                                     title: "",
+                                                    published: "",
                                                     description: "",
                                                     tags: [],
                                                     mpd: "",
@@ -278,9 +280,10 @@ module.exports = function(io) {
                 let nudity = req.body.nudity;
                 let tags = [...req.body.tags];
                 if (videoRecord && userRecord) {
-                    Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
+                    let publishDate = new Date().toLocaleString();
+                    Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
                         let userUpdated;
-                        let graphRecordUpdated = neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags);
+                        let graphRecordUpdated = neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate);
                         if (!err) {
                             User.findOne({ username: req.body.user }, async function(err, user) {
                                 if (err) {
@@ -1047,8 +1050,14 @@ module.exports = function(io) {
         }).lean();
     }
 
+    /* Gets cloudfront url when provided raw mpd without cloud address
+    req.body.mpdString | String of mpd requiring full cloudfront address
+    */
+    const fetchCloudfrontUrl = (req, res, next) => {
+        return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(req.body.rawMpd) });
+    }
+
     const getfriends = (req, res, next) => {
-        console.log(req.body.username);
         User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
             if (err) throw err;
             let userfriendslist;
@@ -1057,7 +1066,7 @@ module.exports = function(io) {
                     userfriendslist = result.friends[0].confirmed;
                 }
             }
-            res.json(userfriendslist);
+            return res.json(userfriendslist);
         }).lean();
     }
 
@@ -1373,6 +1382,10 @@ module.exports = function(io) {
 
     router.post('/publishVideo', (req, res, next) => {
         return publishVideo(req, res, next);
+    });
+
+    router.post('/fetchCloudfrontUrl', (req, res, next) => {
+        return fetchCloudfrontUrl(req, res, next);
     });
 
     // GET a users profile
