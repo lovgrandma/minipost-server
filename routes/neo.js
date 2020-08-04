@@ -9,6 +9,7 @@ const path = require('path');
 const neo4j = require('neo4j-driver');
 const driver = neo4j.driver("bolt://localhost", neo4j.auth.basic("neo4j", "neo4j"));
 const uuidv4 = require('uuid/v4');
+const cloudfrontconfig = require('./servecloudfront');
 const utility = require('./utility');
 const User = require('../models/user');
 const Chat = require('../models/chat');
@@ -358,7 +359,56 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
     }
 }
 
+const fetchSingleVideoData = async (mpd) => {
+    let session = driver.session();
+    let query = "match (a:Video {mpd: $mpd}) return a";
+    let params = { mpd: mpd };
+    let data = {
+        video: {},
+        relevantVideos: [],
+        articleRespones: [],
+        videoResponses: []
+    }
+    data.video = await session.run(query, params)
+        .then(async (result) => {
+            let video = {
+                mpd: "",
+                author: "",
+                title: "",
+                description: "",
+                tags: [],
+                published: "",
+                likes: "",
+                dislikes: "",
+                views: ""
+            }
+            if (result.records[0]) {
+                if (result.records[0]._fields[0]) {
+                    video.author = result.records[0]._fields[0].properties.author.toString();
+                    video.title = result.records[0]._fields[0].properties.title.toString();
+                    video.description = result.records[0]._fields[0].properties.description.toString();
+                    video.tags = result.records[0]._fields[0].properties.tags;
+                    video.published = result.records[0]._fields[0].properties.publishDate;
+                    video.likes = result.records[0]._fields[0].properties.likes.toNumber();
+                    video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
+                    video.views = result.records[0]._fields[0].properties.views.toNumber();
+                    return video;
+                } else {
+                    return video;
+                }
+            } else {
+                return video;
+            }
+        })
+        .then(async (result) => {
+            result.mpd = await cloudfrontconfig.serveCloudfrontUrl(mpd);
+            return result;
+        })
+    return data;
+};
+
 module.exports = { returnFriends: returnFriends,
                  checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
-                 createOneVideo: createOneVideo };
+                 createOneVideo: createOneVideo,
+                 fetchSingleVideoData: fetchSingleVideoData };

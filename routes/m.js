@@ -1079,6 +1079,10 @@ module.exports = function(io) {
         return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(req.body.rawMpd) });
     }
 
+    const fetchVideoPageData = async (req, res, next) => {
+        return res.json(await neo.fetchSingleVideoData(req.body.rawMpd));
+    }
+
     const getfriends = (req, res, next) => {
         User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
             if (err) throw err;
@@ -1397,6 +1401,10 @@ module.exports = function(io) {
 
     router.post('/fetchCloudfrontUrl', (req, res, next) => {
         return fetchCloudfrontUrl(req, res, next);
+    });
+
+    router.post('/fetchVideoPageData', (req, res, next) => {
+        return fetchVideoPageData(req, res, next);
     });
 
     // GET a users profile
