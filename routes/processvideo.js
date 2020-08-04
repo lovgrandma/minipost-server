@@ -106,7 +106,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                     video.setVideoSize("?x" + resolutions[i], true, true).setDisableAudio();
                     video.addCommand('-vcodec', 'libx264');
                     if (video.metadata.video.codec == "mpeg2video") {
-                        video.addCommand('-preset', 'fast');
+                        video.addCommand('-preset', 'medium');
                     } else {
                         video.addCommand('-preset', 'faster');
                     }

@@ -271,7 +271,7 @@ module.exports = function(io) {
     }
 
     /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db */
-    const publishVideo = async (req, res, end) => {
+    const publishVideo = async (req, res, next) => {
         if (req.body.title && req.body.user && req.body.mpd) {
             if (req.body.title.length > 0 && req.body.mpd.length > 0) {
                 let videoRecord = await Video.findOne({ _id: req.body.mpd }).lean();
@@ -321,6 +321,28 @@ module.exports = function(io) {
                 console.log("Error updating");
             }
         }
+    }
+    
+    const serveVideos = async (req, res, next) => {
+        if (req.body.user) {
+            if (req.body.user.length > 0) {
+                let videoRecommendations = await neo.serveVideoRecommendations(req.body.user);
+                console.log(videoRecommendations);
+                if (videoRecommendations) {
+                    return res.json(videoRecommendations);
+                } else {
+                    return res.json({querystatus: 'error retrieving video recommendations'});
+                }
+            }
+        } else {
+            let videoRecommendations = await neo.serveVideoRecommendations();
+            if (videoRecommendations) {
+                return res.json(videoRecommendations);
+            } else {
+                return res.json({querystatus: 'error retrieving video recommendations'});
+            }
+        }
+        return res.json({querystatus: 'empty username in video recommendation query'});
     }
 
     // End of upload functionality
@@ -1338,19 +1360,8 @@ module.exports = function(io) {
         return getUserVideos(req, res, next);
     })
 
-    router.post('/serveVideos', async (req, res, next) => {
-        if (req.body.user) {
-            if (req.body.user.length > 0) {
-                let videoRecommendations = await neo.serveVideoRecommendations(req.body.user);
-                console.log(videoRecommendations);
-                if (videoRecommendations) {
-                    return res.json(videoRecommendations);
-                } else {
-                    return res.json({querystatus: 'error retrieving video recommendations'});
-                }
-            }
-        }
-        return res.json({querystatus: 'empty username in video recommendation query'});
+    router.post('/serveVideos', (req, res, next) => {
+        return serveVideos(req, res, next);
     });
 
     router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {

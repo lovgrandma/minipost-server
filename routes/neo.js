@@ -50,10 +50,10 @@ Serving video recommendations based on similar people and friends requires for f
 
 This method should return up to 100 video mpds, titles, authors, descriptions, date, views and thumbnail locations every time it runs.
 */
-const serveVideoRecommendations = async (user) => {
+const serveVideoRecommendations = async (user = "") => {
     let videoArray = [];
     if (user) {
-        if (user.length) {
+        if (user.length > 0) {
             videoArray = checkFriends(user).then((result) => {
                 if (result) {
                     console.log("preliminary stuff done");
@@ -63,7 +63,11 @@ const serveVideoRecommendations = async (user) => {
             .then( async (result) => {
                 return await serveRandomTrendingVideos(user);
             });
+        } else {
+            return await serveRandomTrendingVideos();
         }
+    } else {
+        return await serveRandomTrendingVideos();
     }
     return videoArray;
 }
@@ -78,20 +82,24 @@ const serveVideoRecommendations = async (user) => {
 7. "" in last 5 years
 This is a fallback method incase recommendation system cannot find enough unique high affinity videos user has not watched in 6 months
 */
-const serveRandomTrendingVideos = async (user) => {
-    console.log("Serve random trending videos " + user);
+const serveRandomTrendingVideos = async (user = "") => {
     const session = driver.session();
     const query = "match (a:Video) with a order by a.views desc return a";
     let getHighestTrending = session.run(query)
         .then(async (result) => {
             session.close();
-            let graphRecords = result.records;
-            graphRecords.forEach((record, i) => {
-                let views = record._fields[0].properties.views.toNumber();
-                graphRecords[i]._fields[0].properties.views = views;
-            });
-            if (graphRecords) {
-                return graphRecords;
+            if (result) {
+                let graphRecords = result.records;
+                graphRecords.forEach((record, i) => {
+                    let views = record._fields[0].properties.views.toNumber();
+                    graphRecords[i]._fields[0].properties.views = views;
+                    graphRecords[i]._fields[0].properties.articles = [];
+                });
+                if (graphRecords) {
+                    return graphRecords;
+                } else {
+                    return false;
+                }
             } else {
                 return false;
             }
