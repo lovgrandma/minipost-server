@@ -1,6 +1,6 @@
 /** Utility file utility.js
 @version 0.1
-@author Jesse Thompson, @ninjagecko
+@author Jesse Thompson, @ninjagecko @
 Includes helper utility functions that abstract more complicated functionality for seemingly mundane operations
 
 Original code for deepEquals, arraysEqual, objectsEqual, mapsEqual typedArraysEqual from stackoverflow user @ninjagecko
@@ -63,4 +63,25 @@ function typedArraysEqual(a,b) {
     return true;
 }
 
-module.exports = { deepEquals: deepEquals };
+/** Fisher-Yates shuffle https://stackoverflow.com/questions/2450954/how-to-randomize-shuffle-a-javascript-array */
+function shuffleArray(array) {
+  var currentIndex = array.length, temporaryValue, randomIndex;
+
+  // While there remain elements to shuffle...
+  while (0 !== currentIndex) {
+
+    // Pick a remaining element...
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex -= 1;
+
+    // And swap it with the current element.
+    temporaryValue = array[currentIndex];
+    array[currentIndex] = array[randomIndex];
+    array[randomIndex] = temporaryValue;
+  }
+
+  return array;
+}
+
+module.exports = { deepEquals: deepEquals,
+                 shuffleArray: shuffleArray };

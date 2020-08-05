@@ -327,7 +327,6 @@ module.exports = function(io) {
         if (req.body.user) {
             if (req.body.user.length > 0) {
                 let videoRecommendations = await neo.serveVideoRecommendations(req.body.user);
-                console.log(videoRecommendations);
                 if (videoRecommendations) {
                     return res.json(videoRecommendations);
                 } else {

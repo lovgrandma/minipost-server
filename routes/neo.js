@@ -85,7 +85,7 @@ This is a fallback method incase recommendation system cannot find enough unique
 */
 const serveRandomTrendingVideos = async (user = "") => {
     const session = driver.session();
-    const query = "match (a:Video) with a order by a.views desc return a";
+    const query = "match (a:Video) with a order by a.views desc return a limit 100";
     let getHighestTrending = session.run(query)
         .then(async (result) => {
             session.close();
@@ -97,7 +97,7 @@ const serveRandomTrendingVideos = async (user = "") => {
                     graphRecords[i]._fields[0].properties.articles = [];
                 });
                 if (graphRecords) {
-                    return graphRecords;
+                    return utility.shuffleArray(graphRecords);
                 } else {
                     return false;
                 }
