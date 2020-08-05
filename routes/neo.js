@@ -97,7 +97,7 @@ const serveRandomTrendingVideos = async (user = "") => {
                     graphRecords[i]._fields[0].properties.articles = [];
                 });
                 if (graphRecords) {
-                    return utility.shuffleArray(graphRecords);
+                    return graphRecords;
                 } else {
                     return false;
                 }

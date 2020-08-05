@@ -14,7 +14,8 @@ function deepEquals(a,b) {
     if (a instanceof Map && b instanceof Map)
         return mapsEqual(a,b);
     if (a instanceof Set && b instanceof Set)
-        throw "Error: set equality by hashing not implemented."
+        console.log("Error: set equality by hashing not implemented.");
+        return false;
     if ((a instanceof ArrayBuffer || ArrayBuffer.isView(a)) && (b instanceof ArrayBuffer || ArrayBuffer.isView(b)))
         return typedArraysEqual(a,b);
     return a==b;  // see note[1] -- IMPORTANT

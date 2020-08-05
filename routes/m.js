@@ -412,7 +412,7 @@ module.exports = function(io) {
         }
     };
 
-    const register = (req, res, next) => {
+    const register = async (req, res, next) => {
         if (req.body.username && req.body.regemail && req.body.regpassword && req.body.confirmPassword) {
             // confirm that user typed same password twice
             if (req.body.regpassword !== req.body.confirmPassword) {
@@ -422,8 +422,27 @@ module.exports = function(io) {
                 return next(err);
             }
 
+            /** Checks if user with uuid exists already. Checks 5 times if uniquely generated random uuid is matched 5 times in a row */
+            const userExists = async () => {
+                let uniqueUuid = 0;
+                let uuid;
+                do {
+                    uuid = uuidv4();
+                    let result = await User.findOne({ _id: uuid });
+                    if (!result) { // No result found, uuid can safely be used for this user
+                        uniqueUuid = 5;
+                        return uuid;
+                    } else {
+                        uniqueUuid++;
+                    }
+                } while (uniqueUuid < 5);
+                // If randomly matches 5 uuid's, just return a randomly generated uuid and hope it does not match. 1 in several billion chance of running. Will pass error to client if matches again preventing crash
+                return uuidv4();
+            }
+
             // create obj with form input
             var userData = {
+                _id: await userExists(),
                 email: req.body.regemail,
                 username: req.body.username,
                 password: req.body.regpassword,
@@ -455,13 +474,12 @@ module.exports = function(io) {
                 ],
             };
 
-            User.findOne({username: req.body.username }, function(err, result) { // Search for entered user to see if user already exists
-                console.log("Attempt register, use exists already?: " + result);
-                if (req.body.username.length < 23 && req.body.username.length > 4) {
+            User.findOne({username: req.body.username }, async function(err, result) { // Search for entered user to see if user already exists
+                if (req.body.username.length > 4 && req.body.username.length < 23) {
                     if (result == null) { // if null, user does not exist
-                        User.findOne({email: req.body.regemail }, function(err, result) { // Search for entered email to see if email exists
+                        User.findOne({email: req.body.regemail }, async function(err, result) { // Search for entered email to see if email exists
                             if (result == null) { // if null email does not exist
-                                User.create(userData, function (error, user) { // Use schema's 'create' method to insert document into Mongo
+                                User.create((await userData), function (error, user) { // Use schema's 'create' method to insert document into Mongo
                                     if (error) {
                                         var err = new Error('Error creating user using schema after email & user check');
                                         err.status = 401;
@@ -1314,6 +1332,12 @@ module.exports = function(io) {
         }
     }
 
+    /** Increments view of single video */
+    const incrementView = (req, res, next) => {
+        console.log(req.body.mpd);
+        res.json(true);
+    }
+
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
         return login(req, res, next);
@@ -1402,8 +1426,12 @@ module.exports = function(io) {
         return fetchCloudfrontUrl(req, res, next);
     });
 
-    router.post('/fetchVideoPageData', (req, res, next) => {
+    router.post('/fetchvideopagedata', (req, res, next) => {
         return fetchVideoPageData(req, res, next);
+    });
+
+    router.post('/incrementview', (req, res, next) => {
+        return incrementView(req, res, next);
     });
 
     // GET a users profile

@@ -1,6 +1,5 @@
 // Sockets routes
 const redis = require('redis');
-const rejson = require('redis-rejson');
 const redisapp = require('./redis');
 const bluebird = require('bluebird'); // Allows promisfying of redis calls, important for simplified returning key-values for redis calls
 bluebird.promisifyAll(redis);
