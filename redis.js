@@ -27,7 +27,7 @@ redisclient.on('error', function (err) {
     console.log('redisclient: Something went wrong ' + err);
 });
 
-redisvideoclient.on('error', function() {
+redisvideoclient.on('error', function(err) {
     console.log('redisvideoclient: Something went wrong ' + err);
 });
 

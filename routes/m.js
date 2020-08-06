@@ -1050,6 +1050,7 @@ module.exports = function(io) {
         User.findOne({username: req.body.username}, {username: 1, videos: 1} , async function(err, result) {
             if (err) throw err;
             let pendingVideo = false;
+            let responded = false;
             if (result) {
                 for (let video of result.videos) {
                     if (video) {
@@ -1064,24 +1065,28 @@ module.exports = function(io) {
                                 }).lean();
                             } else {
                                 pendingVideo = true;
-                                res.json({ querystatus: video.id + ";processing"  });
+                                responded = true;
+                                return res.json({ querystatus: video.id + ";processing"  });
                                 break;
                             }
                         } else if (video.state.toString().match(/([0-9].*);awaitinginfo/)) {
                             if (!pendingVideo) {
                                 let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
-                                res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
+                                responded = true;
+                                return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
+                                break;
                             }
                         }
                     }
                 }
+            } else {
+                return res.json({ querystatus: "error: Did not complete check for getUserVideos" });
             }
-            if (!pendingVideo) {
-                res.json({ querystatus: "no pending videos" });
+            if (!pendingVideo && !responded) {
+                return res.json({ querystatus: "no pending videos" });
             }
         }).lean();
-        res.json({ querystatus: "error: Did not complete check for getUserVideos" });
     }
 
     /* Gets cloudfront url when provided raw mpd without cloud address
