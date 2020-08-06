@@ -16,6 +16,7 @@ const Bull = require('bull');
 
 const redisApp = require('../redis');
 const redisclient = redisApp.redisclient;
+const redisvideoclient = redisApp.redisvideoclient;
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
@@ -374,6 +375,12 @@ module.exports = function(io) {
             path: '/',
             httpOnly: true,
         });
+        res.cookie('CloudFrontCookiesSet', true, { // This is used to reduce calls to server to send cloudfront watch cookies
+            //domain: '.minipost.app',
+            maxAge: 1000 * 60 * 60 * 24 * 6, // 3 days. Should Reset cookies again halfway through cycle
+            path: '/',
+            httpOnly: false,
+        });
         res.send({ querystatus: 'video permissions received'});
     };
 
@@ -533,7 +540,6 @@ module.exports = function(io) {
 
 
     const logout = (req, res, next) => {
-        console.log('/logout');
         if (req.session) {
             // delete session object
             req.session.destroy(function(err) {
@@ -553,7 +559,6 @@ module.exports = function(io) {
     // Search users that match a specific query. If limit included then return more users in response up to defined limit.
     // Use "req.body.limit" for "Load more" functionality on search
     const searchusers = (req, res, next) => {
-        //    console.log(req.body.searchusers);
         let searchresults = [];
         if (!req.body.searchusers) {
             res.json({querystatus: 'empty friend search query'});
@@ -602,7 +607,6 @@ module.exports = function(io) {
     }
 
     const requestfriendship = (req, res, next) => {
-        console.log(req.body.thetitleofsomeonewewanttobecloseto, req.body.username);
         if (!req.body.thetitleofsomeonewewanttobecloseto) {
             // stop if there is no information to query.
             res.json({querystatus: 'empty friend search query'});
@@ -610,7 +614,6 @@ module.exports = function(io) {
             // prevent asking self for friend request on server side
             res.json({querystatus: 'cant send a friend request to yourself :/'});
         } else {
-            console.log("hey");
             // function to make request and add user to pending list.
             let addusertopendinglist = function() {
                 User.findOneAndUpdate({username: req.body.thetitleofsomeonewewanttobecloseto},
@@ -633,7 +636,6 @@ module.exports = function(io) {
                     let listedpendingrequests = result.friends[1].pending;
                     function alreadyaskedtobefriends() {
                         for (var i = 0; i < listedpendingrequests.length; i++) {
-                            console.log(listedpendingrequests[i].username);
                             if (listedpendingrequests[i].username === req.body.username) {
                                 return true;
                             }
@@ -682,14 +684,12 @@ module.exports = function(io) {
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log(result)
                     User.findOneAndUpdate({username: req.body.username},
                                           {$pull: { "friends.0.confirmed": { username: req.body.thetitleofsomeoneiusedtowanttobecloseto}}},
                                           {new: true},
                                           function(err, result) {
                         if (err) throw err;
                         console.log(result)
-                        console.log("stopbeingfriends()");
                         if (!resEnd) {
                             res.json(result.friends[0].confirmed);
                             resEnd = true;
@@ -742,7 +742,6 @@ module.exports = function(io) {
                     if (result.friends[1].pending[0]) {
                         let otheruserpresent = function() { // Checks if the other requesting user is present in the users pending list. If this is true, down below this function it will remove that user from users own pending list.
                             for (let i = 0; i < result.friends[1].pending.length; i++) {
-                                console.log(result.friends[1].pending[i]);
                                 if (result.friends[1].pending[i].username == req.body.thetitleofsomeoneiusedtowanttobecloseto) {
                                     console.log("refuse friendship with " + result.friends[1].pending[i]);
                                     return true;
@@ -837,7 +836,6 @@ module.exports = function(io) {
             // find one, respond with friends pending list
             User.findOne({username: req.body.username }, {friends: 1}, function(err, result) {
                 if (err) throw err;
-                console.log(result.friends[1].pending)
                 res.json(result.friends[1].pending);
             }).lean();
         }
@@ -845,8 +843,6 @@ module.exports = function(io) {
 
     // Function to become friends. Adds users username to newfriend confirmed list and adds newfriend to users confirmed list if not already present.
     const acceptfriendrequest = (req, res, next) => {
-        console.log(req.body.username)
-        console.log(req.body.newfriend)
         if (!req.body.newfriend) {
             res.json({querystatus: 'empty new friend in query'});
         } else if (!req.body.username) {
@@ -854,14 +850,12 @@ module.exports = function(io) {
         } else {
             // AddToSet functionality in becomefriends() ensures that even if a user is already listed in another users confirmed list, a duplicate is not created. Therefore separate becomefriends() functions do not need to be built. It will update if value is not present.
             let becomefriends = function() {
-                console.log(req.body.username + " and " + req.body.newfriend + " becoming friends");
                 User.findOneAndUpdate({username: req.body.newfriend}, // Update new friends document.
                                       {$addToSet: { "friends.0.confirmed": { username: req.body.username}}},
                                       {upsert: true,
                                        new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log(result);
                     User.findOneAndUpdate({username: req.body.username}, // Update your own document.
                                           {$addToSet: { "friends.0.confirmed": { username: req.body.newfriend}}},
                                           {upsert: true,
@@ -1087,6 +1081,7 @@ module.exports = function(io) {
                 res.json({ querystatus: "no pending videos" });
             }
         }).lean();
+        res.json({ querystatus: "error: Did not complete check for getUserVideos" });
     }
 
     /* Gets cloudfront url when provided raw mpd without cloud address
@@ -1115,7 +1110,6 @@ module.exports = function(io) {
 
     // Change functionality of this to redis first, mongo second
     const beginchat = (req, res, next) => {
-        console.log(req.body.username, req.body.chatwith, req.body.message);
         let booleans = [];
         let chatdata;
         let chatmessage = req.body.message;
@@ -1333,9 +1327,14 @@ module.exports = function(io) {
     }
 
     /** Increments view of single video */
-    const incrementView = (req, res, next) => {
-        console.log(req.body.mpd);
-        res.json(true);
+    const incrementView = async (req, res, next) => {
+        if (req.body.mpd) {
+            let viewRecorded = await neo.incrementVideoView(req.body.mpd);
+            if (viewRecorded) {
+                return res.json(true);
+            }
+        }
+        return res.json(false);
     }
 
     // LOGIN USING CREDENTIALS

@@ -3,6 +3,12 @@
 @author Jesse Thompson
 Interfaces with neo4j architecture, updates and appends relationships with relevant data and calls recommendation algorithms
 */
+const redis = require('redis');
+const redisapp = require('../redis');
+const bluebird = require('bluebird'); // Allows promisfying of redis calls, important for simplified returning key-values for redis calls
+bluebird.promisifyAll(redis);
+const redisclient = redisapp.redisclient;
+const redisvideoclient = redisapp.redisvideoclient;
 
 const util = require('util');
 const path = require('path');
@@ -407,8 +413,51 @@ const fetchSingleVideoData = async (mpd) => {
     return data;
 };
 
+/** Experimental high frequency increment video views on redis database. Returns boolean */
+const incrementVideoView = async (mpd) => {
+    let videoExists = await checkVideoExists(mpd);
+    if (videoExists) {
+        let videoExistsRedis = redisvideoclient.hgetall(mpd);
+        if (videoExistsRedis) {
+            redisvideoclient.hincrby(mpd, "views", 1);
+            return await redisvideoclient.hgetall(mpd, (err, value) => {
+                setVideoViewsNeo(mpd, value.views);
+                return true;
+            })
+        } else {
+            redisvideoclient.hmset(mpd, "views", 1, "likes", 0, "views", 0);
+            return await redisvideoclient.hgetall(mpd, (err, value) => {
+                setVideoViewsNeo(mpd, value.views);
+                return true;
+            })
+        }
+    } else {
+        return false;
+    }
+}
+
+/** Sets video views by passed value */
+const setVideoViewsNeo = async (mpd, value) => {
+    if (parseInt(value)) {
+        let session = driver.session();
+        let query = "match (a:Video {mpd: $mpd}) set a.views = $views return a";
+        let params = { mpd: mpd, views: neo4j.int(value) };
+        return await session.run(query, params)
+            .then((result) => {
+            if (result) {
+                return true;
+            } else {
+                return false;
+            }
+        })
+    } else {
+        return false;
+    }
+}
+
 module.exports = { returnFriends: returnFriends,
                  checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
                  createOneVideo: createOneVideo,
-                 fetchSingleVideoData: fetchSingleVideoData };
+                 fetchSingleVideoData: fetchSingleVideoData,
+                 incrementVideoView: incrementVideoView };
