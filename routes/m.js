@@ -29,7 +29,7 @@ const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost
 maintenance.queueMaintenance(videoQueue);
 
 module.exports = function(io) {
-    // file upload
+    /* File upload functionality */
     const aws = require('aws-sdk');
     const s3Cred = require('./api/s3credentials.js');
     const multer = require('multer');
@@ -345,7 +345,18 @@ module.exports = function(io) {
         return res.json({querystatus: 'empty username in video recommendation query'});
     }
 
-    // End of upload functionality
+
+    // End of video upload functionality
+    /**************************************************************************************/
+
+    /* Article publish functionality */
+
+    const publishArticle = (req, res, next) => {
+        console.log(req.body);
+        return res.json({ querystatus: "article posted"});
+    }
+
+    // End of article functionality
     /**************************************************************************************/
 
     const policy = cloudfrontconfig.policy;
@@ -1422,9 +1433,13 @@ module.exports = function(io) {
         return beginchat(req, res, next);
     });
 
-    router.post('/publishVideo', (req, res, next) => {
+    router.post('/publishvideo', (req, res, next) => {
         return publishVideo(req, res, next);
     });
+
+    router.post('/publisharticle', (req, res, next) => {
+        return publishArticle(req, res, next);
+    })
 
     router.post('/fetchCloudfrontUrl', (req, res, next) => {
         return fetchCloudfrontUrl(req, res, next);
