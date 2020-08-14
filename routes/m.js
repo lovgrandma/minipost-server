@@ -3,16 +3,18 @@
 @author Jesse Thompson
 Handles calls to mongodb, user authentication, chat functionality, video upload and records etc
 */
-const express = require('express');
-const router = express.Router();
 const util = require('util');
-const uuidv4 = require('uuid/v4');
 const fs = require('fs');
 const path = require('path');
-const ffmpeg = require('ffmpeg');
 const cp = require('child_process');
 const CPUs = require('os').cpus().length;
+
+const express = require('express');
+const router = express.Router();
+const uuidv4 = require('uuid/v4');
+const ffmpeg = require('ffmpeg');
 const Bull = require('bull');
+const neo = require('./neo.js');
 
 const redisApp = require('../redis');
 const redisclient = redisApp.redisclient;
@@ -20,9 +22,9 @@ const redisvideoclient = redisApp.redisvideoclient;
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
+const Article = require('../models/article');
 const processvideo = require('./processvideo.js');
 const maintenance = require('./queuemaintenance.js');
-const neo = require('./neo.js');
 const cloudfrontconfig = require('./servecloudfront');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
@@ -346,17 +348,70 @@ module.exports = function(io) {
     }
 
 
-    // End of video upload functionality
     /**************************************************************************************/
-
     /* Article publish functionality */
 
-    const publishArticle = (req, res, next) => {
-        console.log(req.body);
-        return res.json({ querystatus: "article posted"});
+    /* Publish article method. Will create a record of article on mongoDb with author, title, running heads (array) and body (saved as raw html)
+    Also must create record of article on neo4j for recommendation capabilities. If either fails, destroy the other record before returning falsy value to client */
+    const publishArticle = async (req, res, next) => {
+        try {
+            if (req.body.body && req.body.title && req.body.author) {
+                if (req.body.body.length > 0 && req.body.title.length > 0 && req.body.title.length < 202 && req.body.author.length > 0) {
+                    const articleExists = await Article.findOne({ title: req.body.title, author: req.body.author });
+                    const userExists = await User.findOne({ username: req.body.author });
+                    let uuid = uuidv4();
+                    if (userExists) {
+                        if (articleExists) {
+                            return res.json({ querystatus: "you have already posted an article with this title" });
+                        } else {
+                            let i = 0;
+                            do {
+                                let articleUuidTaken = await Article.findOne({ _id: uuid });
+                                if (!articleUuidTaken) {
+                                    i = 3;
+                                    const article = {
+                                        _id: uuid,
+                                        author: req.body.author,
+                                        title: req.body.title,
+                                        body: req.body.body,
+                                        publishDate: new Date().toLocaleString()
+                                    }
+                                    const articleTrim = {
+                                        id: article._id,
+                                        publishDate: article.publishDate
+                                    }
+                                    // Create articles on mongodb and neo4j
+                                    const createdArticle = await Article.create(article);
+                                    const neoCreatedArticle = await neo.createOneArticle(article);
+                                    if (createdArticle && neoCreatedArticle) { // If article copies created successfully, make record on user mongodb document
+                                        let recordArticleUserDoc = await User.findOneAndUpdate({ username: article.author }, { $addToSet: { "articles": articleTrim }}, { new: true }).lean();
+                                        if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on all 3 documents, return success response else delete both and return failed response
+                                            return res.json({ querystatus: "article posted"});
+                                        } else {
+                                            neo.deleteOneArticle(article._id);
+                                            Article.deleteOne({ _id: uuid});
+                                            return res.json({ querystatus: "failed to post article" });
+                                        }
+                                    } else {
+                                        // either failed, delete both
+                                        return res.json({ querystatus: "failed to post article" });
+                                    }
+                                }
+                                uuid = uuidv4();
+                                i++;
+                            } while (i < 3);
+                        }
+                    }
+                }
+            }
+            return res.json({ querystatus: "failed to post article" });
+        } catch (err) {
+            // Body value went wrong
+            return res.json({ querystatus: "failed to post article" });
+        }
     }
 
-    // End of article functionality
+
     /**************************************************************************************/
 
     const policy = cloudfrontconfig.policy;

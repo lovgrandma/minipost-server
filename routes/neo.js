@@ -152,60 +152,59 @@ const checkFriends = async (user) => {
                             const query = "match (a:Person {name: $username })-[r:FRIENDS]-(b) return b";
                             let checkFriendMatches = await session.run(query, {username: user })
                                 .then(async (result) => {
-                                session.close();
-                                let graphRecords = result.records;
-                                if (result.records.length > 0) {
-                                    let temp = [];
-                                    graphRecords.forEach((record) => {
-                                        temp.push(record._fields[0].properties.name.toString());
-                                    })
-                                    graphRecords = temp;
-                                }
-                                if (graphRecords) {
-                                    /* If user friends listed in mongoDb user document are not present in graph database, the following first ensures users exist as individual documents in mongoDb */
-                                    let promiseCheckFriends = mongoFriends.map(mongoRecord => {
-                                        return new Promise( async (resolve, reject) => {
-                                            if (graphRecords.indexOf(mongoRecord.username) < 0) { // Check if mongoRecord string present in graph records array
-                                                let otherUser = await User.findOne({username: mongoRecord.username}).lean();
-                                                if (otherUser) {
-                                                    /* Add user to graph db if user exists in mongo but not present in graph db */
-                                                    checkUserExists(mongoRecord.username)
-                                                        .then(async (result) => {
-                                                        if (!result) {
-                                                            resolve(await createOneUser(mongoRecord.username));
+                                    session.close();
+                                    let graphRecords = result.records;
+                                    if (result.records.length > 0) {
+                                        let temp = [];
+                                        graphRecords.forEach((record) => {
+                                            temp.push(record._fields[0].properties.name.toString());
+                                        })
+                                        graphRecords = temp;
+                                    }
+                                    if (graphRecords) {
+                                        /* If user friends listed in mongoDb user document are not present in graph database, the following first ensures users exist as individual documents in mongoDb */
+                                        let promiseCheckFriends = mongoFriends.map(mongoRecord => {
+                                            return new Promise( async (resolve, reject) => {
+                                                if (graphRecords.indexOf(mongoRecord.username) < 0) { // Check if mongoRecord string present in graph records array
+                                                    let otherUser = await User.findOne({username: mongoRecord.username}).lean();
+                                                    if (otherUser) {
+                                                        /* Add user to graph db if user exists in mongo but not present in graph db */
+                                                        checkUserExists(mongoRecord.username)
+                                                            .then(async (result) => {
+                                                            if (!result) {
+                                                                resolve(await createOneUser(mongoRecord.username));
+                                                            }
+                                                            resolve(true);
+                                                        })
+                                                    } else {
+                                                        mongoFriends.filter(record => record !== mongoRecord); // Untested. Should delete record from mongoFriends array since user was not found in mongoDb.
+                                                        resolve(true);
+                                                    }
+                                                } else {
+                                                    resolve(true);
+                                                }
+                                            })
+                                        })
+
+                                        /* Determine if mongoFriends array is the same as graphRecord friends array, avoids running unnecessary i/o calls on mongodb and neo4j */
+                                        if (!utility.deepEquals(mongoFriends, graphRecords)) {
+                                            let checkAndAddFriends = await Promise.all(promiseCheckFriends).then( async (result) => {
+                                                const checkFriendsAdded= await Promise.all(mongoFriends.map(mongoRecord => {
+                                                    return new Promise (async (resolve, reject) => {
+                                                        if (graphRecords.indexOf(mongoRecord.username < 0)) {
+                                                            resolve(await mergeOneFriendEdge(user, mongoRecord.username));
                                                         }
                                                         resolve(true);
                                                     })
-                                                } else {
-                                                    mongoFriends.filter(record => record !== mongoRecord); // Untested. Should delete record from mongoFriends array since user was not found in mongoDb.
-                                                    resolve(true);
-                                                }
-                                            } else {
-                                                resolve(true);
-                                            }
-                                        })
-                                    })
-
-                                    /* Determine if mongoFriends array is the same as graphRecord friends array, avoids running unnecessary i/o calls on mongodb and neo4j */
-                                    if (!utility.deepEquals(mongoFriends, graphRecords)) {
-                                        let checkAndAddFriends = await Promise.all(promiseCheckFriends).then( async (result) => {
-                                            const checkFriendsAdded= await Promise.all(mongoFriends.map(mongoRecord => {
-                                                return new Promise (async (resolve, reject) => {
-                                                    if (graphRecords.indexOf(mongoRecord.username < 0)) {
-                                                        resolve(await mergeOneFriendEdge(user, mongoRecord.username));
-                                                    }
-                                                    resolve(true);
-                                                })
-                                            }));
-                                            return checkFriendsAdded;
-                                        });
-                                        return checkAndAddFriends;
+                                                }));
+                                                return checkFriendsAdded;
+                                            });
+                                            return checkAndAddFriends;
+                                        }
+                                    } else {
+                                        return false;
                                     }
-                                } else {
-                                    return false;
-                                }
-
-                            })
+                                })
                             return await checkFriendMatches;
                         })
                         return completeUserGraphDbCheck;
@@ -365,6 +364,63 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
     }
 }
 
+/* Creates one article node on neo4j and connects it ([r:WROTE]->) to user neo4j node */
+const createOneArticle = async (article) => {
+    try {
+        if (article._id && article.author && article.title && article.body) {
+            if (article._id.length > 0 && article.author.length > 0 && article.title.length > 0 && article.body.length > 0) {
+                // Initial check to see if article with same id already exists
+                let session = driver.session();
+                let query = "match (a:Article { id: $id }) return a";
+                let params = { id: article._id };
+                let nodeExists = await session.run(query, params);
+                if (!nodeExists || nodeExists.records.length == 0) {
+                    session.close();
+                    let session2 = driver.session();
+                    query = "match (a:Person { name: $author }) create (b:Article { id: $id, author: $author, title: $title, body: $body, publishDate: $publishDate, reads: 0, likes: 0, dislikes: 0 }) merge (a)-[r:WROTE]->(b) return b"
+                    params = { id: article._id, author: article.author, title: article.title, body: article.body, publishDate: article.publishDate };
+                    let createdArticle = await session2.run(query, params); // Create article with relationship to author
+                    if (createdArticle.records.length > 0) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    } catch (err) {
+        console.log(err);
+        return false;
+    }
+}
+
+/* Deletes one article from database. This should almost always never be called even if user deletes profile. Only call if error creating article on mongoDb to maintain consistency */
+const deleteOneArticle = async (id) => {
+    try {
+        if (id) {
+            if (id.length > 0) {
+                let session = driver.session();
+                let query = "match (a:Article { id: $id })-[r]-() delete a, r";
+                let params = { id: id };
+                let completeDeletion = await session.run(query, params);
+                if (completeDeletion) {
+                    session.close();
+                    return true;
+                }
+            }
+        }
+        return false;
+    } catch (err) {
+        return false;
+    }
+}
+
 const fetchSingleVideoData = async (mpd) => {
     let session = driver.session();
     let query = "match (a:Video {mpd: $mpd}) return a";
@@ -377,6 +433,7 @@ const fetchSingleVideoData = async (mpd) => {
     }
     data.video = await session.run(query, params)
         .then(async (result) => {
+            session.close();
             let video = {
                 mpd: "",
                 author: "",
@@ -444,6 +501,7 @@ const setVideoViewsNeo = async (mpd, value) => {
         let params = { mpd: mpd, views: neo4j.int(value) };
         return await session.run(query, params)
             .then((result) => {
+            session.close();
             if (result) {
                 return true;
             } else {
@@ -459,5 +517,7 @@ module.exports = { returnFriends: returnFriends,
                  checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
                  createOneVideo: createOneVideo,
+                 createOneArticle: createOneArticle,
+                 deleteOneArticle: deleteOneArticle,
                  fetchSingleVideoData: fetchSingleVideoData,
                  incrementVideoView: incrementVideoView };

@@ -50,6 +50,10 @@ const UserSchema = new mongoose.Schema({
     chats: {
         type: Array,
         required: true,
+    },
+    articles: {
+        type: Array,
+        required: true
     }
 });
 
