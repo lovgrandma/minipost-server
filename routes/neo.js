@@ -91,16 +91,37 @@ This is a fallback method incase recommendation system cannot find enough unique
 */
 const serveRandomTrendingVideos = async (user = "") => {
     const session = driver.session();
-    const query = "match (a:Video) with a order by a.views desc return a limit 100";
+    //const query = "MATCH (a:Video) OPTIONAL MATCH (a)-[r:RESPONSE*]-(b:Article) RETURN a, r, b ORDER BY a.views DESC limit 50";
+    const query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC limit 50";
     let getHighestTrending = session.run(query)
         .then(async (result) => {
             session.close();
             if (result) {
                 let graphRecords = result.records;
                 graphRecords.forEach((record, i) => {
-                    let views = record._fields[0].properties.views.toNumber();
-                    graphRecords[i]._fields[0].properties.views = views;
                     graphRecords[i]._fields[0].properties.articles = [];
+                    let found = 0;
+                    graphRecords.forEach((recordCompare, j) => {
+                        if (record._fields[0].properties.mpd === recordCompare._fields[0].properties.mpd) {
+                            found++;
+                            if (recordCompare._fields[2]) {
+                                // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
+                                recordCompare._fields[2].properties.likes = parseInt(recordCompare._fields[2].properties.likes);
+                                recordCompare._fields[2].properties.dislikes = parseInt(recordCompare._fields[2].properties.dislikes);
+                                recordCompare._fields[2].properties.reads = parseInt(recordCompare._fields[2].properties.reads);
+                                graphRecords[i]._fields[0].properties.articles.push(recordCompare._fields[2]);
+                            }
+                            if (found > 1) {
+                                graphRecords.splice(j, 1);
+                            }
+                        }
+                    });
+                    console.log(record._fields[0].properties.articles);
+                    let views = 0;
+                    if (record._fields[0].properties.views) {
+                        views = record._fields[0].properties.views.toNumber();
+                    }
+                    graphRecords[i]._fields[0].properties.views = views;
                 });
                 if (graphRecords) {
                     return graphRecords;
@@ -298,7 +319,7 @@ const mergeOneFriendEdge = async (user, to) => {
     return friendEdgeAdded;
 }
 
-/** Creates or updates one video record in graph db
+/** Creates or updates one video record in graph db. Returns full record
 Requires user, users uuid and mpd. Other methods must be empty string or in tags case must be empty array.
 */
 const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate) => {
@@ -319,6 +340,17 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 let query = "create (a:Video { mpd: $mpd, author: $author, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0 }) return a";
                 let params = { mpd: mpd, author: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags };
                 const videoRecordCreated = await session.run(query, params)
+                    .then((record) => {
+                        session.close();
+                        return record;
+                    })
+                    .then((record) => {
+                        session = driver.session();
+                        // Will merge author node to just created video node in neo4j
+                        query = "match (a:Person {name: $author}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        session.run(query, params);
+                        return record;
+                    });
                 return videoRecordCreated;
             } else {
                 let query = "match (a:Video { mpd: $mpd }) set a += { ";
@@ -364,7 +396,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
     }
 }
 
-/* Creates one article node on neo4j and connects it ([r:WROTE]->) to user neo4j node */
+/* Creates one article node on neo4j and merges user ((author)-[r:PUBLISHED]->(article)) to article neo4j node */
 const createOneArticle = async (article) => {
     try {
         if (article._id && article.author && article.title && article.body) {
@@ -377,11 +409,27 @@ const createOneArticle = async (article) => {
                 if (!nodeExists || nodeExists.records.length == 0) {
                     session.close();
                     let session2 = driver.session();
-                    query = "match (a:Person { name: $author }) create (b:Article { id: $id, author: $author, title: $title, body: $body, publishDate: $publishDate, reads: 0, likes: 0, dislikes: 0 }) merge (a)-[r:WROTE]->(b) return b"
+                    query = "match (a:Person { name: $author }) create (b:Article { id: $id, author: $author, title: $title, body: $body, publishDate: $publishDate, reads: 0, likes: 0, dislikes: 0 }) merge (a)-[r:PUBLISHED]->(b) return b"
                     params = { id: article._id, author: article.author, title: article.title, body: article.body, publishDate: article.publishDate };
-                    let createdArticle = await session2.run(query, params); // Create article with relationship to author
-                    if (createdArticle.records.length > 0) {
-                        return true;
+                    // Create article with relationship to author
+                    let createdArticle = await session2.run(query, params)
+                    if (createdArticle) {
+                        session2.close();
+                        let session3 = driver.session();
+                        if (article.responseTo && article.responseType) {
+                            params = { id: article._id, responseTo: article.responseTo };
+                            if (article.responseType === "video") {
+                                console.log(article.responseTo);
+                                query = "match (a:Article { id: $id}), (b:Video { mpd: $responseTo }) merge (b)-[r:RESPONSE]->(a)";
+                                session3.run(query, params);
+                            } else if (article.responseType === "article") {
+                                query = "match (a:Article { id: $id}), (b:Article { id: $responseTo }) merge (b)-[r:RESPONSE]->(a)";
+                                session3.run(query, params);
+                            }
+                        }
+                        if (createdArticle.records.length > 0) {
+                            return true;
+                        }
                     } else {
                         return false;
                     }

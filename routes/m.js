@@ -273,56 +273,74 @@ module.exports = function(io) {
         }
     }
 
-    /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db */
+    /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db, also merges relationship in neo4j (author)-[PUBLISHED]->(video) */
     const publishVideo = async (req, res, next) => {
-        if (req.body.title && req.body.user && req.body.mpd) {
-            if (req.body.title.length > 0 && req.body.mpd.length > 0) {
-                let videoRecord = await Video.findOne({ _id: req.body.mpd }).lean();
-                let userRecord = await User.findOne({ username: req.body.user }).lean();
-                let desc = req.body.desc;
-                let nudity = req.body.nudity;
-                let tags = [...req.body.tags];
-                if (videoRecord && userRecord) {
-                    let publishDate = new Date().toLocaleString();
-                    Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
-                        let userUpdated;
-                        let graphRecordUpdated = neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate);
-                        if (!err) {
-                            User.findOne({ username: req.body.user }, async function(err, user) {
-                                if (err) {
-                                    console.log("Error updating");
-                                } else {
-                                    let foundOne = false;
-                                    let updateValue;
-                                    for (i = 0; i < user.videos.length; i++) {
-                                        if (user.videos[i].id == req.body.mpd) { // Check if video in user document matches mpd of video user wants to update
-                                            foundOne = true;
-                                            // If awaiting info (meaning processing is done) change state of video on user document
-                                            if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
-                                                updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
-                                                userUpdated = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
-                                                break;
+        try {
+            if (req.body.title && req.body.user && req.body.mpd) {
+                if (req.body.title.length > 0 && req.body.mpd.length > 0) {
+                    let videoRecord = await Video.findOne({ _id: req.body.mpd }).lean();
+                    let userRecord = await User.findOne({ username: req.body.user }).lean();
+                    let desc = req.body.desc;
+                    let nudity = req.body.nudity;
+                    let tags = [...req.body.tags];
+                    if (videoRecord && userRecord) {
+                        let publishDate = new Date().toLocaleString();
+                        Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
+                            let userUpdated;
+                            let graphRecordUpdated = neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate);
+                            let mpd = "";
+                            if (graphRecordUpdated.records) {
+                                if (graphRecordUpdated.records[0]) {
+                                    if (graphRecordUpdated.records[0]._fields) {
+                                        if (graphRecordUpdated.records[0]._fields[0]) {
+                                            if (graphRecordUpdated.records[0]._fields[0].properties) {
+                                                if (graphRecordUpdated.records[0]._fields[0].properties.mpd) {
+                                                    mpd = graphRecordUpdated.records[0]._fields[0].properties.mpd;
+                                                }
                                             }
                                         }
                                     }
-                                    if (!foundOne) {
-                                        console.log("Error updating");
-                                    }
-                                    if (graphRecordUpdated || userUpdated) {
-                                        res.json({ querystatus: "Record published/updated" });
-                                    }
                                 }
-                            })
-                        } else {
-                            console.log(err);
-                        }
-                    }).lean();
+                            }
+                            if (!err) {
+                                User.findOne({ username: req.body.user }, async function(err, user) {
+                                    if (err) {
+                                        console.log("Error updating");
+                                    } else {
+                                        let foundOne = false;
+                                        let updateValue;
+                                        for (i = 0; i < user.videos.length; i++) {
+                                            if (user.videos[i].id == req.body.mpd) { // Check if video in user document matches mpd of video user wants to update
+                                                foundOne = true;
+                                                // If awaiting info (meaning processing is done) change state of video on user document
+                                                if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
+                                                    updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
+                                                    userUpdated = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if (!foundOne) {
+                                            res.json({ querystatus: "error publishing/updating"});
+                                        }
+                                        if (graphRecordUpdated || userUpdated) {
+                                            res.json({ querystatus: "record published/updated", mpd: mpd});
+                                        }
+                                    }
+                                })
+                            } else {
+                                res.json({ querystatus: "error publishing/updating"});
+                            }
+                        }).lean();
+                    } else {
+                        res.json({ querystatus: "error publishing/updating"});
+                    }
                 } else {
-                    console.log("Error updating");
+                    res.json({ querystatus: "error publishing/updating"});
                 }
-            } else {
-                console.log("Error updating");
             }
+        } catch (err) {
+            res.json({ querystatus: "error publishing/updating"});
         }
     }
     
@@ -369,12 +387,20 @@ module.exports = function(io) {
                                 let articleUuidTaken = await Article.findOne({ _id: uuid });
                                 if (!articleUuidTaken) {
                                     i = 3;
+                                    let responseTo = "";
+                                    let responseType = "";
+                                    if (req.body.responseTo && req.body.responseType) {
+                                        responseTo = req.body.responseTo;
+                                        responseType = req.body.responseType;
+                                    }
                                     const article = {
                                         _id: uuid,
                                         author: req.body.author,
                                         title: req.body.title,
                                         body: req.body.body,
-                                        publishDate: new Date().toLocaleString()
+                                        publishDate: new Date().toLocaleString(),
+                                        responseTo: responseTo,
+                                        responseType: responseType
                                     }
                                     const articleTrim = {
                                         id: article._id,
@@ -385,7 +411,7 @@ module.exports = function(io) {
                                     const neoCreatedArticle = await neo.createOneArticle(article);
                                     if (createdArticle && neoCreatedArticle) { // If article copies created successfully, make record on user mongodb document
                                         let recordArticleUserDoc = await User.findOneAndUpdate({ username: article.author }, { $addToSet: { "articles": articleTrim }}, { new: true }).lean();
-                                        if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on all 3 documents, return success response else delete both and return failed response
+                                        if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on last mongo db call (map through all users articles for match), return success response else delete both and return failed response
                                             return res.json({ querystatus: "article posted"});
                                         } else {
                                             neo.deleteOneArticle(article._id);
@@ -394,6 +420,7 @@ module.exports = function(io) {
                                         }
                                     } else {
                                         // either failed, delete both
+                                        console.log("article was not recorded on mongo and neo4j");
                                         return res.json({ querystatus: "failed to post article" });
                                     }
                                 }
