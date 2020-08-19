@@ -437,7 +437,8 @@ const deleteOneArticle = async (id) => {
 
 const fetchSingleVideoData = async (mpd) => {
     let session = driver.session();
-    let query = "match (a:Video {mpd: $mpd})-[r:RESPONSE]->(b:Article) return a, r, b";
+    // Must query for original video and potential relational matches to articles. Not either/or or else query will not function properly
+    let query = "match (a:Video {mpd: $mpd}) optional match (a:Video {mpd: $mpd})-[r:RESPONSE]->(b:Article) return a, r, b";
     let params = { mpd: mpd };
     let data = {
         video: {},

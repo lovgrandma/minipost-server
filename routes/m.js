@@ -1431,7 +1431,7 @@ module.exports = function(io) {
     /** Increments view of single video */
     const incrementView = async (req, res, next) => {
         if (req.body.mpd) {
-            let viewRecorded = await neo.incrementVideoView(req.body.mpd);
+            let viewRecorded = await neo.incrementVideoView(req.body.mpd, req.body.user);
             if (viewRecorded) {
                 return res.json(true);
             }
