@@ -13,7 +13,7 @@ const redisvideoclient = redisapp.redisvideoclient;
 const util = require('util');
 const path = require('path');
 const neo4j = require('neo4j-driver');
-const driver = neo4j.driver("bolt://localhost", neo4j.auth.basic("neo4j", "neo4j"));
+const driver = neo4j.driver("bolt://localhost:11003", neo4j.auth.basic("neo4j", "minipost"));
 const uuidv4 = require('uuid/v4');
 const cloudfrontconfig = require('./servecloudfront');
 const utility = require('./utility');
@@ -98,25 +98,30 @@ const serveRandomTrendingVideos = async (user = "") => {
             session.close();
             if (result) {
                 let graphRecords = result.records;
+                console.log(graphRecords);
+                console.log(graphRecords[0]._fields[0].properties);
                 graphRecords.forEach((record, i) => {
                     graphRecords[i]._fields[0].properties.articles = [];
                     let found = 0;
-                    graphRecords.forEach((recordCompare, j) => {
-                        if (record._fields[0].properties.mpd === recordCompare._fields[0].properties.mpd) {
+                    for (let j = 0; j < graphRecords.length; j++) {
+                        console.log(graphRecords.length);
+                        if (record._fields[0].properties.mpd === graphRecords[j]._fields[0].properties.mpd) {
                             found++;
-                            if (recordCompare._fields[2]) {
+                            if (graphRecords[j]._fields[2]) {
                                 // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
-                                recordCompare._fields[2].properties.likes = parseInt(recordCompare._fields[2].properties.likes);
-                                recordCompare._fields[2].properties.dislikes = parseInt(recordCompare._fields[2].properties.dislikes);
-                                recordCompare._fields[2].properties.reads = parseInt(recordCompare._fields[2].properties.reads);
-                                graphRecords[i]._fields[0].properties.articles.push(recordCompare._fields[2]);
+                                //console.log(record._fields[0].properties);
+                                graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
+                                graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);
+                                graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
+                                record._fields[0].properties.articles.push(graphRecords[j]._fields[2]);
                             }
+                            console.log(found + " duplicates found of iteration " + i);
                             if (found > 1) {
                                 graphRecords.splice(j, 1);
+                                j--;
                             }
                         }
-                    });
-                    console.log(record._fields[0].properties.articles);
+                    }
                     let views = 0;
                     if (record._fields[0].properties.views) {
                         views = record._fields[0].properties.views.toNumber();
@@ -419,9 +424,8 @@ const createOneArticle = async (article) => {
                         if (article.responseTo && article.responseType) {
                             params = { id: article._id, responseTo: article.responseTo };
                             if (article.responseType === "video") {
-                                console.log(article.responseTo);
                                 query = "match (a:Article { id: $id}), (b:Video { mpd: $responseTo }) merge (b)-[r:RESPONSE]->(a)";
-                                session3.run(query, params);
+                                session3.run(query, params); // Run method to create relationships between video and article as response to video
                             } else if (article.responseType === "article") {
                                 query = "match (a:Article { id: $id}), (b:Article { id: $responseTo }) merge (b)-[r:RESPONSE]->(a)";
                                 session3.run(query, params);
@@ -471,12 +475,12 @@ const deleteOneArticle = async (id) => {
 
 const fetchSingleVideoData = async (mpd) => {
     let session = driver.session();
-    let query = "match (a:Video {mpd: $mpd}) return a";
+    let query = "match (a:Video {mpd: $mpd})-[r:RESPONSE]->(b:Article) return a, r, b";
     let params = { mpd: mpd };
     let data = {
         video: {},
         relevantVideos: [],
-        articleRespones: [],
+        articleResponses: [],
         videoResponses: []
     }
     data.video = await session.run(query, params)
@@ -503,6 +507,18 @@ const fetchSingleVideoData = async (mpd) => {
                     video.likes = result.records[0]._fields[0].properties.likes.toNumber();
                     video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
                     video.views = result.records[0]._fields[0].properties.views.toNumber();
+                    // Append article responses of this video to articleResponses data member
+                    if (result.records.length > 1) {
+                        for (let i = 0; i < result.records.length; i++) {
+                            if (result.records[i]) {
+                                if (result.records[i]._fields[2]) {
+                                    if (result.records[i]._fields[2].properties) {
+                                        data.articleResponses.push(result.records[i]._fields[2].properties);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     return video;
                 } else {
                     return video;

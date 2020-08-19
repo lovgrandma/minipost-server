@@ -287,7 +287,7 @@ module.exports = function(io) {
                         let publishDate = new Date().toLocaleString();
                         Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
                             let userUpdated;
-                            let graphRecordUpdated = neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate);
+                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate);
                             let mpd = "";
                             if (graphRecordUpdated.records) {
                                 if (graphRecordUpdated.records[0]) {
@@ -377,7 +377,7 @@ module.exports = function(io) {
                 if (req.body.body.length > 0 && req.body.title.length > 0 && req.body.title.length < 202 && req.body.author.length > 0) {
                     const articleExists = await Article.findOne({ title: req.body.title, author: req.body.author });
                     const userExists = await User.findOne({ username: req.body.author });
-                    let uuid = uuidv4();
+                    let uuid = uuidv4().split("-").join("");
                     if (userExists) {
                         if (articleExists) {
                             return res.json({ querystatus: "you have already posted an article with this title" });
@@ -424,7 +424,7 @@ module.exports = function(io) {
                                         return res.json({ querystatus: "failed to post article" });
                                     }
                                 }
-                                uuid = uuidv4();
+                                uuid = uuidv4().split("-").join("");
                                 i++;
                             } while (i < 3);
                         }
@@ -498,7 +498,7 @@ module.exports = function(io) {
                     req.session.username = user.username;
                     let options = {
                         maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
-                        signed: true,
+                        signed: true
                     }
                     res.cookie('loggedIn', user.username, [options]);
                     return res.json({querystatus: "loggedin"});
@@ -929,7 +929,11 @@ module.exports = function(io) {
             // find one, respond with friends pending list
             User.findOne({username: req.body.username }, {friends: 1}, function(err, result) {
                 if (err) throw err;
-                res.json(result.friends[1].pending);
+                if (result) {
+                    res.json(result.friends[1].pending);
+                } else {
+                    res.json({querystatus: 'error user not found'});
+                }
             }).lean();
         }
     }
