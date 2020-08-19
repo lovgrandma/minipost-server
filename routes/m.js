@@ -592,6 +592,7 @@ module.exports = function(io) {
                                             maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
                                             signed: true,
                                         }
+                                        neo.createOneUser(user.username, user._id);
                                         if (req.cookies.loggedIn === undefined) {
                                             (res.cookie('loggedIn', user.username, [options]));
                                         }
@@ -958,9 +959,10 @@ module.exports = function(io) {
                                           {upsert: true,
                                            new: true},
                                           function(err, result) {
-                        if (err) throw err;
-                        let userfriendslist = result.friends[0].confirmed;
-                        res.json(userfriendslist);
+                                              if (err) throw err;
+                                              let userfriendslist = result.friends[0].confirmed;
+                                              neo.checkFriends(req.body.username); // Build user friends in neo4j db
+                                              res.json(userfriendslist);
                     });
                 }).lean();
             }

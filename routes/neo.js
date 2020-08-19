@@ -13,7 +13,7 @@ const redisvideoclient = redisapp.redisvideoclient;
 const util = require('util');
 const path = require('path');
 const neo4j = require('neo4j-driver');
-const driver = neo4j.driver("bolt://localhost:11003", neo4j.auth.basic("neo4j", "minipost"));
+const driver = neo4j.driver("bolt://localhost:7687", neo4j.auth.basic("neo4j", "git2003hp7474%"));
 const uuidv4 = require('uuid/v4');
 const cloudfrontconfig = require('./servecloudfront');
 const utility = require('./utility');
@@ -128,13 +128,14 @@ const checkFriends = async (user) => {
         if (user && typeof user === 'string') {
             if (user.length > 0) {
                 let userDoc = await User.findOne({username: user}).lean();
+                console.log(userDoc);
                 if (userDoc) {
                     const mongoFriends = userDoc.friends[0].confirmed;
                     const session = driver.session();
                     let completeUserGraphDbCheck = await checkUserExists(user)
                         .then(async(result) => {
                             if (!result) { // If user does not exist, add single new user to graph database
-                                return await createOneUser(user);
+                                return await createOneUser(user, userDoc._id);
                             }
                             return;
                         })
@@ -162,7 +163,7 @@ const checkFriends = async (user) => {
                                                         checkUserExists(mongoRecord.username)
                                                             .then(async (result) => {
                                                             if (!result) {
-                                                                resolve(await createOneUser(mongoRecord.username));
+                                                                resolve(await createOneUser(mongoRecord.username, otherUser._id ));
                                                             }
                                                             resolve(true);
                                                         })
@@ -257,10 +258,10 @@ const checkVideoExists = async (mpd) => {
 }
 
 /* Add one user to graph database */
-const createOneUser = async (user) => {
+const createOneUser = async (user, id) => {
     session = driver.session();
-    query = "create (a:Person {name: $username}) return a";
-    const userCreated = session.run(query, {username: user })
+    query = "create (a:Person {name: $username, id: $id }) return a";
+    const userCreated = session.run(query, { username: user, id: id })
         .then(async(result) => {
             session.close();
             if (result) {
@@ -295,7 +296,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
         let videoCreateProcessComplete = checkUserExists(user)
         .then(async (result) => {
             if (!result) {
-                return await createOneUser(user)
+                return await createOneUser(user, userUuid);
             }
         })
         .then(async (result) => {
@@ -552,4 +553,5 @@ module.exports = { checkFriends: checkFriends,
                  createOneArticle: createOneArticle,
                  deleteOneArticle: deleteOneArticle,
                  fetchSingleVideoData: fetchSingleVideoData,
-                 incrementVideoView: incrementVideoView };
+                 incrementVideoView: incrementVideoView,
+                 createOneUser: createOneUser };
