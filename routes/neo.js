@@ -21,37 +21,6 @@ const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
 
-/* Simple neo4j query. Working and shows syntax of method. */
-const returnFriends = async () => {
-    /* The session can only have one open query at once. Ensure that you never have several queries running at the same time,
-    this will crash nodejs. Use .then promise syntax for simplicity */
-    const session = driver.session();
-    try {
-        const query = "match (n) return n";
-        /* Await result if you want to use result to make another query. This avoids pyramid callback function style programming */
-        const result = await session.writeTransaction
-        (tx => tx.run(query)
-            .then((result) => {
-                /* Syntax for accessing records and record information.
-                Always check to ensure that the record has a type of property before you assume it is there */
-                result.records.forEach((record) => {
-                    if (record._fields[0].properties.name) {
-                        console.log(record._fields[0].properties.name);
-                    }
-                })
-                return result;
-            })
-            .catch((err) => {
-                console.log(err);
-            })
-        )
-
-        console.log(result); // Result can be accessed here since this is async/await method being used properly.
-    } catch (err) {
-        console.log(err);
-    }
-}
-
 /* Serves video recommendations to client
 Serving video recommendations based on similar people and friends requires for friends of a user to be accurately represented in the database. Running checkFriends before running any recommendation logic ensures that users friends are updated in the database
 
@@ -98,24 +67,19 @@ const serveRandomTrendingVideos = async (user = "") => {
             session.close();
             if (result) {
                 let graphRecords = result.records;
-                console.log(graphRecords);
-                console.log(graphRecords[0]._fields[0].properties);
                 graphRecords.forEach((record, i) => {
                     graphRecords[i]._fields[0].properties.articles = [];
                     let found = 0;
                     for (let j = 0; j < graphRecords.length; j++) {
-                        console.log(graphRecords.length);
                         if (record._fields[0].properties.mpd === graphRecords[j]._fields[0].properties.mpd) {
                             found++;
                             if (graphRecords[j]._fields[2]) {
                                 // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
-                                //console.log(record._fields[0].properties);
                                 graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
                                 graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);
                                 graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
                                 record._fields[0].properties.articles.push(graphRecords[j]._fields[2]);
                             }
-                            console.log(found + " duplicates found of iteration " + i);
                             if (found > 1) {
                                 graphRecords.splice(j, 1);
                                 j--;
@@ -241,7 +205,6 @@ const checkFriends = async (user) => {
         }
         return false;
     } catch (err) {
-        console.log("Graphdb check users method failed to complete");
         return false;
     }
 }
@@ -447,7 +410,6 @@ const createOneArticle = async (article) => {
             return false;
         }
     } catch (err) {
-        console.log(err);
         return false;
     }
 }
@@ -508,13 +470,11 @@ const fetchSingleVideoData = async (mpd) => {
                     video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
                     video.views = result.records[0]._fields[0].properties.views.toNumber();
                     // Append article responses of this video to articleResponses data member
-                    if (result.records.length > 1) {
-                        for (let i = 0; i < result.records.length; i++) {
-                            if (result.records[i]) {
-                                if (result.records[i]._fields[2]) {
-                                    if (result.records[i]._fields[2].properties) {
-                                        data.articleResponses.push(result.records[i]._fields[2].properties);
-                                    }
+                    for (let i = 0; i < result.records.length; i++) {
+                        if (result.records[i]) {
+                            if (result.records[i]._fields[2]) {
+                                if (result.records[i]._fields[2].properties) {
+                                    data.articleResponses.push(result.records[i]._fields[2].properties);
                                 }
                             }
                         }
@@ -557,28 +517,32 @@ const incrementVideoView = async (mpd) => {
     }
 }
 
-/** Sets video views by passed value */
+/** Sets video views by passed value. Is not incremental which may cause issues. Inconsequential if fails or not working well, can replace with method that
+updates all neo4j video records on schedule. Views are reliably incremented with redis */
 const setVideoViewsNeo = async (mpd, value) => {
-    if (parseInt(value)) {
-        let session = driver.session();
-        let query = "match (a:Video {mpd: $mpd}) set a.views = $views return a";
-        let params = { mpd: mpd, views: neo4j.int(value) };
-        return await session.run(query, params)
-            .then((result) => {
-            session.close();
-            if (result) {
-                return true;
-            } else {
-                return false;
-            }
-        })
-    } else {
+    try {
+        if (parseInt(value)) {
+            let session = driver.session();
+            let query = "match (a:Video {mpd: $mpd}) set a.views = $views return a";
+            let params = { mpd: mpd, views: neo4j.int(value) };
+            return await session.run(query, params)
+                .then((result) => {
+                session.close();
+                if (result) {
+                    return true;
+                } else {
+                    return false;
+                }
+            })
+        } else {
+            return false;
+        }
+    } catch (err) {
         return false;
     }
 }
 
-module.exports = { returnFriends: returnFriends,
-                 checkFriends: checkFriends,
+module.exports = { checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
                  createOneVideo: createOneVideo,
                  createOneArticle: createOneArticle,

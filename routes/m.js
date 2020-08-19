@@ -127,7 +127,7 @@ module.exports = function(io) {
         tellSocket(progress);
     });
 
-
+    // Prepares upload to be sent to worker process
     const prepareUpload = async (req, res, next) => {
         // Check video file to ensure that file is viable for encoding, gets file info of temporarily saved file. Uses path to determine if viable for ffmpeg conversion
         let objUrls = [];
@@ -180,12 +180,12 @@ module.exports = function(io) {
                                         if (l < 3) {
                                             return createUniqueUuid();
                                         } else {
-                                            res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
-                                            deleteOne(originalVideo);
+                                            return res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
+                                            processvideo.deleteOne(originalVideo);
                                         }
                                     } else {
                                         res.status(500).send({ querystatus: "Max calls to video storage exceeded, could not find unique uuid", err: "reset" });
-                                        deleteOne(originalVideo);
+                                        processvideo.deleteOne(originalVideo);
                                     }
                                 }).catch(async error => {
                                     room = "upl-" + generatedUuid; // Socket for updating user on video processing progress
@@ -235,13 +235,13 @@ module.exports = function(io) {
                                                     } else {
                                                         if (!ranOnce) {
                                                             res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
-                                                            deleteOne(originalVideo);
+                                                            processvideo.deleteOne(originalVideo);
                                                         }
                                                     }
                                                 } else {
                                                     if (!ranOnce) {
                                                         res.status(200).send({ querystatus: "Something went wrong", err: "reset" });
-                                                        deleteOne(originalVideo);
+                                                        processvideo.deleteOne(originalVideo);
                                                     }
                                                 }
                                             }
@@ -249,18 +249,18 @@ module.exports = function(io) {
                                     };
                                     if (!ranOnce) {
                                         res.status(200).send({ querystatus: "Bad Resolution", err: "reset" });
-                                        deleteOne(originalVideo);
+                                        processvideo.deleteOne(originalVideo);
                                     }
                                 })
                             };
                             createUniqueUuid();
                         } else {
                             res.status(200).send({ querystatus: "Bad Resolution", err: "reset" });
-                            deleteOne(originalVideo);
+                            processvideo.deleteOne(originalVideo);
                         }
                     } else {
                         res.status(200).send({ querystatus: "Invalid video container", err: "reset" });
-                        deleteOne(originalVideo);
+                        processvideo.deleteOne(originalVideo);
                     }
                 }).catch(error => {
                     console.log(error);
