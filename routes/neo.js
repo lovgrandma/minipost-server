@@ -474,6 +474,9 @@ const fetchSingleVideoData = async (mpd) => {
                         if (result.records[i]) {
                             if (result.records[i]._fields[2]) {
                                 if (result.records[i]._fields[2].properties) {
+                                    result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
+                                    result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
+                                    result.records[i]._fields[2].properties.reads = parseInt(result.records[i]._fields[2].properties.reads);
                                     data.articleResponses.push(result.records[i]._fields[2].properties);
                                 }
                             }
