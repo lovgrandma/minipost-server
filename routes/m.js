@@ -61,10 +61,6 @@ module.exports = function(io) {
                 if (progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] == job.data.generatedUuid) {
                     console.log(progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] + " complete");
                     console.log(await videoQueue.getJobCounts());
-                    setTimeout(async () => {
-                        done();
-                        console.log(await videoQueue.getJobCounts());
-                    }, 15000);
                 }
             }
         });
@@ -305,7 +301,8 @@ module.exports = function(io) {
                             if (!err) {
                                 User.findOne({ username: req.body.user }, async function(err, user) {
                                     if (err) {
-                                        console.log("Error updating");
+                                        console.log(err);
+                                        // "Error finding user in mongoDb"
                                     } else {
                                         let foundOne = false;
                                         let updateValue;
@@ -420,7 +417,7 @@ module.exports = function(io) {
                                         }
                                     } else {
                                         // either failed, delete both
-                                        console.log("article was not recorded on mongo and neo4j");
+                                        // article was not recorded on mongo and neo4j
                                         return res.json({ querystatus: "failed to post article" });
                                     }
                                 }
@@ -715,8 +712,7 @@ module.exports = function(io) {
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log(result);
-                    console.log("addusertopendinglist fired");
+                    console.log(result); // addusertopendinglist fired
                     res.json(result);
                 }).lean();
             }
@@ -731,15 +727,14 @@ module.exports = function(io) {
                     function alreadyaskedtobefriends() {
                         for (var i = 0; i < listedpendingrequests.length; i++) {
                             if (listedpendingrequests[i].username === req.body.username) {
-                                return true;
+                                return true; //listedpendingrequests fired
                             }
-                            console.log("listedpendingrequests fired");
                         }
                     }
+                    // run for loop through list of friends to determine if already confirmed friends
                     function alreadyFriends() {
                         for (let i = 0; i < result.friends[0].confirmed.length; i++) {
                             if (req.body.thetitleofsomeonewewanttobecloseto == result.friends[0].confirmed[i]) {
-                                console.log(result.friends[0].confirmed[i]);
                                 return true;
                             }
                         }
@@ -761,6 +756,7 @@ module.exports = function(io) {
 
     // the following route request either removes a friend from confirmed or pending list.
     // req.body.pending is a boolean, confirms if revoke pending request, otherwise it is a normal revoke friendship request
+    // req.body.refuse for when refusing user
     const revokefriendship = (req, res, next) => {
         let resEnd = false;
         if (!req.body.thetitleofsomeoneiusedtowanttobecloseto) {
@@ -792,16 +788,14 @@ module.exports = function(io) {
                 }).lean();
             }
 
+            // Will remove user from pending list of other user during revoke friendship. Cleans other users pending list of users name.
             let removeselffrompendinglist = function() {
                 User.findOneAndUpdate({username: req.body.thetitleofsomeoneiusedtowanttobecloseto},
                                       {$pull: { "friends.1.pending": { username: req.body.username}}},
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log("removeselffrompendinglist()");
-                    console.log(result)
-                    if (req.body.pending) { // if revoke pending post request, respond with confirmed friends list. Otherwise response will come from stopbeingfriends function
-                        console.log("pending request " + req.body.pending);
+                    if (req.body.pending) { // if revoke pending request, respond with confirmed friends list. Otherwise response will come from stopbeingfriends function
                         User.findOne({username: req.body.username},
                                      function(err, result) {
                             res.json(result.friends[0].confirmed);
@@ -811,18 +805,15 @@ module.exports = function(io) {
                 }).lean();
             }
 
+            // Removes other user from your own pending list. Will get users pending list and pull other user from it
             let removeotherfromownpendinglist = function() {
                 User.findOneAndUpdate({username: req.body.username},
                                       {$pull: { "friends.1.pending": { username: req.body.thetitleofsomeoneiusedtowanttobecloseto }}},
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log("removeotherfromownpendinglist()");
-                    console.log(result)
-                    console.log("pending request " + req.body.pending + " refused");
                     User.findOne({username: req.body.username}, function(err, result) {
                         if (err) throw err;
-                        console.log("Resulting pending list of " + req.body.username + " " + result.friends[1]);
                         res.json(result.friends[0].confirmed);
                         resEnd = true;
                     }).lean();
@@ -830,14 +821,12 @@ module.exports = function(io) {
             }
 
             if (req.body.refuse) { // Refusing a request someone else sent TRUE
-                console.log("refuse " + req.body.refuse);
                 User.findOne({ username: req.body.username}, {friends: 1}, function(err, result) {
                     if (err) throw err;
                     if (result.friends[1].pending[0]) {
                         let otheruserpresent = function() { // Checks if the other requesting user is present in the users pending list. If this is true, down below this function it will remove that user from users own pending list.
                             for (let i = 0; i < result.friends[1].pending.length; i++) {
                                 if (result.friends[1].pending[i].username == req.body.thetitleofsomeoneiusedtowanttobecloseto) {
-                                    console.log("refuse friendship with " + result.friends[1].pending[i]);
                                     return true;
                                 }
                             }
@@ -854,7 +843,6 @@ module.exports = function(io) {
             } else {
                 // Standard stop being friends functionality. Determines if your own username is present in other users friends list. Puts this into "usernamepresentinconfirmedlist" function. If not true, youre not friends with the person. Do nothing. If true, stopbeingfriends() function is ran.
                 User.findOne({username: req.body.thetitleofsomeoneiusedtowanttobecloseto }, {friends: 1}, function(err, result) {
-                    console.log(req.body.thetitleofsomeoneiusedtowanttobecloseto, "pending? ", req.body.pending);
                     let higherpriorityran = false;
                     if (!req.body.pending) { // if pending request is not true, user is asking to revoke friendship with friend.
                         if (result.friends[0].confirmed[0]) { // Initial check if user has any friends, if true proceed
@@ -862,7 +850,6 @@ module.exports = function(io) {
                             function usernamepresentinconfirmedlist() { // determine if present in other users confirmed list.
                                 for (var i = 0; i < listedconfirmedfriends.length; i++) {
                                     if (listedconfirmedfriends[i].username === req.body.username) {
-                                        console.log(listedconfirmedfriends[i].username + req.body.username);
                                         return true;
                                     }
                                 }
@@ -870,11 +857,9 @@ module.exports = function(io) {
                             }
                             // if present remove self from friends confirmed list and friend from selfs confirmed list.
                             if (!usernamepresentinconfirmedlist()) { // if not present in confirmed list, not friends.
-                                console.log('initial friendship check');
                                 res.json({querystatus: req.body.thetitleofsomeoneiusedtowanttobecloseto + ' is not friends with you', querymsg: 'not friends'});
                                 resEnd = true;
                             } else {
-                                console.log('a friendship revoked');
                                 stopbeingfriends();
                                 higherpriorityran = true;
                             }
@@ -885,15 +870,12 @@ module.exports = function(io) {
                         }
                     }
 
-                    // Check to remove yourself from pending list regardless if other functions ran.
-                    // determine if present in pending list of asked person.
-                    console.log("First user in other users pending list " + result.friends[1].pending[0]);
-                    console.log(result);
-                    if (result.friends[1].pending[0]) {
+                    // Check to remove yourself from pending list of other user regardless if other functions ran.
+                    // determine if present in pending list of person that asked.
+                    if (result.friends[1].pending[0]) { // Determine if other user even has a single user in pending list
                         let listedpendingrequests = result.friends[1].pending;
                         function alreadyaskedtobefriends() {
                             for (var i = 0; i < listedpendingrequests.length; i++) {
-                                // console.log(listedpendingrequests[i].username + " on " + req.body.thetitleofsomeoneiusedtowanttobecloseto + "'s pending list");
                                 if (listedpendingrequests[i].username === req.body.username) { // Finds out if user is on other users pending list
                                     return true;
                                 }
@@ -901,8 +883,7 @@ module.exports = function(io) {
                         }
 
                         // if present in other users pending list remove self from pending list of asked person.
-                        if (alreadyaskedtobefriends()) {
-                            console.log('friendship request cancelled');
+                        if (alreadyaskedtobefriends()) { // Cancels friend request if you already have asked to be friends
                             removeselffrompendinglist();
                         } else if (!higherpriorityran) {
                             if (!resEnd) {
@@ -973,8 +954,6 @@ module.exports = function(io) {
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log('removing self from other users pending list');
-                    console.log(result)
                 }).lean();
             }
 
@@ -984,8 +963,6 @@ module.exports = function(io) {
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log('removing friend from your pending list');
-                    console.log(result)
                 }).lean();
             }
 
@@ -998,7 +975,6 @@ module.exports = function(io) {
                         let listedpendingrequests = result.friends[1].pending;
                         function friendalreadyaskedtobefriends() {
                             for (var i = 0; i < listedpendingrequests.length; i++) {
-                                console.log(listedpendingrequests[i].username);
                                 if (listedpendingrequests[i].username === req.body.newfriend) {
                                     return true;
                                 }
@@ -1018,18 +994,15 @@ module.exports = function(io) {
                         function usernamepresentinconfirmedlist() {
                             for (var i = 0; i < listedconfirmedfriends[i].username; i++) {
                                 if (listedconfirmedfriends[i].username === req.body.newfriend) {
-                                    console.log(listedconfirmedfriends[i].username, req.body.newfriend);
                                     return true;
                                 }
                             }
                             return false;
                         }
 
-                        if (usernamepresentinconfirmedlist()) {
-                            console.log('new friend already in confirmed list');
+                        if (usernamepresentinconfirmedlist()) { // New friend already in confirmed list
                             return false;
-                        } else {
-                            console.log('new friend not in confirmed list');
+                        } else { // new friend not in confirmed list
                             return true;
                         }
                     }
@@ -1044,7 +1017,6 @@ module.exports = function(io) {
                         let listedpendingrequests = result.friends[1].pending;
                         function alreadyaskedtobefriends() {
                             for (var i = 0; i < listedpendingrequests.length; i++) {
-                                console.log(listedpendingrequests[i].username);
                                 if (listedpendingrequests[i].username === req.body.username) {
                                     return true;
                                 }
@@ -1064,18 +1036,15 @@ module.exports = function(io) {
                         function usernamepresentinconfirmedlist() {
                             for (var i = 0; i < listedconfirmedfriends[i].username; i++) {
                                 if (listedconfirmedfriends[i].username === req.body.username) {
-                                    console.log(listedconfirmedfriends[i].username, req.body.username);
                                     return true;
                                 }
                             }
                             return false;
                         }
                         // if present add self to friends confirmed list and friend to selfs confirmed list.
-                        if (usernamepresentinconfirmedlist()) {
-                            console.log('username already in friends confirmed list');
+                        if (usernamepresentinconfirmedlist()) { // username already in friends confirmed list
                             return false;
-                        } else {
-                            console.log('username not in friends confirmed list');
+                        } else { // username not in friends confirmed list
                             return true;
                         }
                     }
@@ -1100,7 +1069,6 @@ module.exports = function(io) {
     const getconversationlogs = (req, res, next) => {
         User.findOne({username: req.body.username}, {chats: 1}, function(err, result) {
             if (err) throw err;
-            console.log(result);
 
             let chatdata = [];
             let chatsArray = [];
@@ -1136,8 +1104,7 @@ module.exports = function(io) {
             }
 
             getChats().then(function(chatsArray) {
-                getPendingChats().then(function(chatsArray) {
-                    console.log("Chats Array: " + chatsArray);
+                getPendingChats().then(function(chatsArray) { // Chats array variable holds objects of chat arrays
                     res.json(chatsArray); // List of chats for a user is sent to the user in json format.
                 });
             });
@@ -1195,8 +1162,15 @@ module.exports = function(io) {
         return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(req.body.rawMpd) });
     }
 
+    // Fetches page data for single video page
     const fetchVideoPageData = async (req, res, next) => {
         return res.json(await neo.fetchSingleVideoData(req.body.rawMpd));
+    }
+
+    // Fetches page data for single article page
+    const fetchArticlePageData = async (req, res, next) => {
+        console.log(req.body.id);
+        // res.json(await neo.fetchSingleArticleData(req.body.id));
     }
 
     const getfriends = (req, res, next) => {
@@ -1217,9 +1191,7 @@ module.exports = function(io) {
         let booleans = [];
         let chatdata;
         let chatmessage = req.body.message;
-        console.log(req.body.message)
         if (!req.body.chatwith) {
-            console.log(req.body.chatwith);
             res.json({querystatus: 'The chatwith user is undefined' });
         } else {
             // determine if user is already friends with chatwith.
@@ -1233,8 +1205,7 @@ module.exports = function(io) {
                         if (listedconfirmedfriends[i].username === req.body.chatwith) {
                             booleans.push({ friends: true });
                             break;
-                        } else if (i === listedconfirmedfriends.length - 1) {
-                            console.log('single false friends');
+                        } else if (i === listedconfirmedfriends.length - 1) { // single false friends
                             booleans.push({ friends: false });
                             break;
                         }
@@ -1261,12 +1232,10 @@ module.exports = function(io) {
                 if (chatdata) {
                     let chatslistpre = await User.findOne({username: req.body.username }).lean();
                     let chatid = chatdata._id;
-                    console.log(chatdata._id);
-
                     console.log(chatslistpre);
 
+                    // Following calls are for creating confirmed and pending arrays on user document if user document does not have appropriate array properties set
                     if (!chatslistpre.chats[0]) {
-                        console.log('updating confirmed document for user' + req.body.username)
                         User.findOneAndUpdate({username: req.body.username},
                                               {$set: { "chats.0": {confirmed: []}}}, {upsert: true, new: true},
                                               function(err, result) {
@@ -1274,7 +1243,6 @@ module.exports = function(io) {
                         }).lean();
                     }
                     if (!chatslistpre.chats[1]) {
-                        console.log('updating pending document for user');
                         User.findOneAndUpdate({username: req.body.username},
                                               {$set: { "chats.1": {pending: [] }}}, {upsert: true, new: true},
                                               function(err, result) {
@@ -1537,6 +1505,9 @@ module.exports = function(io) {
         return fetchVideoPageData(req, res, next);
     });
 
+    router.post('/fetcharticlepagedata', (req, res, next) => {
+        return fetchArticlePageData(req, res, next);
+    })
     router.post('/incrementview', (req, res, next) => {
         return incrementView(req, res, next);
     });
