@@ -60,6 +60,7 @@ const store = new MongoDBStore(
 
 let io = null;
 const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, socket, job) {
+    console.log(job.id);
     /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
                 */
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
@@ -88,12 +89,14 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                                 return convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                             } else {
                                 console.log(err);
+                                deleteJob(false, job, mpd, room);
                                 deleteVideoArray(objUrls, originalVideo, room, 15000);
                                 job.progress(room + ";something went wrong");
                                 return err;
                             }
                         });
                     } else {
+                        deleteJob(false, job, mpd, room);
                         deleteVideoArray(objUrls, originalVideo, room, 15000);
                         console.log("Audio codec not supported");
                         job.progress(room + "audio codec not supported");
@@ -123,6 +126,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                             return convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                         } else {
                             console.log(err);
+                            deleteJob(false, job, mpd, room);
                             deleteVideoArray(objUrls, originalVideo, room, 15000);
                             job.progress(room + ";video conversion error");
                             return err;
@@ -132,6 +136,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
             }
         } catch (e) {
             console.log("Error msg: " + e.msg);
+            deleteJob(false, job, mpd, room);
             deleteVideoArray(objUrls, originalVideo, room, 15000);
             job.progress(room + ";conversion error");
             return e;
@@ -184,6 +189,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             if (err) {
                 console.log("Something went wrong, mpd was not created");
                 job.progress(room + ";something went wrong");
+                deleteJob(false, job, mpd, room);
                 deleteVideoArray(objUrls, originalVideo, room, 15000);
             } else {
                 try {
@@ -198,6 +204,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
                         console.log("Something went wrong, mpd was not created");
                         job.progress(room + ";something went wrong");
                         delArr.push(...objUrls, ...rawObjUrls);
+                        deleteJob(false, job, mpd, room);
                         deleteVideoArray(delArray, originalVideo, room, 15000);
                     }
                 } catch (err) {
@@ -205,6 +212,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
                     console.log("Something went wrong, mpd was not created");
                     job.progress(room + ";conversion error");
                     delArr.push(...objUrls, ...rawObjUrls);
+                    deleteJob(false, job, mpd, room);
                     deleteVideoArray(delArray, originalVideo, room, 15000);
                 }
             }
@@ -214,6 +222,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         console.log("Something went wrong, mpd was not created");
         job.progress(room + ";conversion error");
         delArr.push(...objUrls, ...rawObjUrls);
+        deleteJob(false, job, mpd, room);
         deleteVideoArray(delArray, originalVideo, room, 15000);
     }
 }
@@ -227,6 +236,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
     let s3Objects = [];
     if (objUrls.length == 0) {
         job.progress(room + ";something went wrong");
+        deleteJob(false, job, mpd, room);
         deleteVideoArray(delArray, originalVideo, room, 15000);
     }
     let delArr = [];
@@ -254,12 +264,14 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                 console.log("Something went wrong, not all objects uploaded to s3");
                 job.progress(room + ";something went wrong");
                 delArr.push(...objUrls, ...rawObjUrls);
+                deleteJob(false, job, mpd, room);
                 deleteVideoArray(delArray, originalVideo, room, 15000);
             }
         } catch (err) {
             console.log("Something went wrong, not all objects uploaded to s3");
             job.progress(room + ";something went wrong");
             delArr.push(...objUrls, ...rawObjUrls);
+            deleteJob(false, job, mpd, room);
             deleteVideoArray(delArray, originalVideo, room, 15000);
         }
     }
@@ -295,7 +307,7 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                 // Updates user record based on whether or not video document is waiting for info (has a title) or not.
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
-                    deleteJob(job, mpd, room);
+                    deleteJob(true, job, mpd, room); // Success
                     deleteVideoArray(delArr, originalVideo, room, 10000);
                 }
                 break;
@@ -306,58 +318,80 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
 
 // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.
 const deleteVideoArray = function(videos, original, room, delay) {
-    setTimeout(() => {
-        for (let i = 0; i < videos.length; i++) {
-            try {
-                if (videos[i].path) {
-                    if (typeof videos[i].path === 'string') {
-                        if (videos.length > 0) { // Very crucial, can run into critical errors if this is not checked
-                            let object = videos[i].path;
-                            if (!object) {
-                                object = "null path";
-                            }
-                            fs.unlink(videos[i].path, (err) => {
-                                if (err) {
-                                    console.log(err);
-                                } else {
-                                    console.log(object + " deleted from temp storage");
+    try {
+        setTimeout(() => {
+            for (let i = 0; i < videos.length; i++) {
+                try {
+                    if (videos[i].path) {
+                        if (typeof videos[i].path === 'string') {
+                            if (videos.length > 0) { // Very crucial, can run into critical errors if this is not checked
+                                let object = videos[i].path;
+                                if (!object) {
+                                    object = "null path";
                                 }
-                            });
+                                fs.unlink(videos[i].path, (err) => {
+                                    if (err) {
+                                        console.log(err);
+                                    } else {
+                                        console.log(object + " deleted from temp storage");
+                                    }
+                                });
+                            }
                         }
+                    }
+                } catch (err) {
+                    console.log(err);
+                }
+            };
+            try {
+                if (original) {
+                    if (typeof original === 'string' && original !== undefined) {
+                        fs.unlink(original, (err) => {
+                            if (err) {
+                                if (typeof original === 'string' && original !== undefined) {
+                                    setTimeout((original) => {
+                                        fs.unlink(original, (err) => {
+                                            console.log("Original video deleted from temp storage on second try");
+                                        });
+                                    }, delay);
+                                }
+                            } else {
+                                console.log("Original video deleted from temp storage");
+                            }
+                        });
                     }
                 }
             } catch (err) {
                 console.log(err);
             }
-        };
-        try {
-            if (original) {
-                if (typeof original === 'string' && original !== undefined) {
-                    fs.unlink(original, (err) => {
-                        if (err) {
-                            if (typeof original === 'string' && original !== undefined) {
-                                setTimeout((original) => {
-                                    fs.unlink(original, (err) => {
-                                        console.log("Original video deleted from temp storage on second try");
-                                    });
-                                }, delay);
-                            }
-                        } else {
-                            console.log("Original video deleted from temp storage");
-                        }
-                    });
-                }
-            }
-        } catch (err) {
-            console.log(err);
+        }, delay);
+    } catch (err) {
+        // Something was undefined as it may have already been deleted
+    }
+}
+
+// Cleanly deletes redis record
+const deleteRedisRecord = async (job) => {
+    const searchQuery = "*:video transcoding:" + job.id;
+    redisclient.keys(searchQuery, (err, reply) => {
+        if (reply) {
+            reply.forEach((el, i) => {
+                redisclient.del(reply[i]);
+            })
         }
-    }, delay);
+    })
 }
 
 /* Completes job and sends message to remove job from queue */
-const deleteJob = async (job, mpd, room) => {
-    job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
-    job.moveToCompleted();
+const deleteJob = async (complete, job, mpd, room) => {
+    deleteRedisRecord(job);
+    if (complete && mpd) {
+        job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
+        job.moveToCompleted();
+    } else {
+        job.progress(room + ";video process failed;null");
+        job.moveToFailed();
+    }
 }
 
 /* Deletes one file cleanly */

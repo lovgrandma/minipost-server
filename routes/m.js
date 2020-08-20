@@ -78,16 +78,18 @@ module.exports = function(io) {
             videoQueue.getJob(jobId).then(function(job) {
                 try {
                     job.getState().then(function(result) {
-                        if (result == 'waiting') {
-                            if (job.attemptsMade < 2 && job.attemptsMade > 0) {
-                                try {
-                                    job.retry();
-                                } catch (err) {
-                                    console.log(err);
+                        if (result) {
+                            if (result == 'waiting') {
+                                if (job.attemptsMade < 2 && job.attemptsMade > 0) {
+                                    try {
+                                        job.retry();
+                                    } catch (err) {
+                                        console.log(err);
+                                    }
+                                } else if (job.attemptsMade > 0) {
+                                    job.moveToFailed();
+                                    job.discard();
                                 }
-                            } else if (job.attemptsMade > 0) {
-                                job.moveToFailed();
-                                job.discard();
                             }
                         }
                     })
@@ -140,8 +142,7 @@ module.exports = function(io) {
                 for (video of userDbObject.videos) {
                     if (video) {
                         if (video.state) {
-                            if (video.state.toString().match(/([a-z0-9].*);processing/)) {
-                                console.log("Db shows video already processing");
+                            if (video.state.toString().match(/([a-z0-9].*);processing/)) { // Db is showing that video is already processing. Return processing upload socket to user
                                 room = "upl-" + video.id;
                                 res.end("processbegin;upl-" + video.id);
                                 currentlyProcessing = true;
@@ -1066,49 +1067,60 @@ module.exports = function(io) {
     // This method will filter through all the confirmed chats on a user document. It will search the chat database for each chat
     // id and if there is data for that searched chat id add it to the chats array. It sets an attribute "pending"
     // in order to differentiate between pending chats and confirmed chats on the front end when array is returned.
-    const getconversationlogs = (req, res, next) => {
-        User.findOne({username: req.body.username}, {chats: 1}, function(err, result) {
-            if (err) throw err;
+    // Only returns to another method
+    const getconversationlogs = async (req, res, next) => {
+        let chatsArray = [];
+        let user = await User.findOne({username: req.body.username}, {chats: 1});
 
-            let chatdata = [];
-            let chatsArray = [];
-            async function getChats() {
-                if (result) { // If no result, there was an error in finding the user. Return empty array.
-                    if (result.chats[0]) {
-                        for (let i = 0; i < result.chats[0].confirmed.length; i++) {
-                            chatdata = await Chat.findOne({_id: result.chats[0].confirmed[i]}).lean();
-                            if (chatdata) {
-                                chatdata.pending = "false";
-                                chatsArray.push(chatdata);
-                            }
+        async function getChats(chatsArray) {
+            if (user) { // If no result, there was an error in finding the user. Return empty array.
+                if (user.chats[0]) {
+                    for (let i = 0; i < user.chats[0].confirmed.length; i++) {
+                        let chatdata = await Chat.findOne({_id: user.chats[0].confirmed[i]}).lean();
+                        if (chatdata) {
+                            chatdata.pending = "false";
+                            chatsArray.push(chatdata);
+                            return chatsArray;
                         }
                     }
                 }
-                return chatsArray;
             }
+            return chatsArray;
+        }
 
-            async function getPendingChats() {
-                if (result) {
-                    if (result.chats[1]) {
-                        for (let i = 0; i < result.chats[1].pending.length; i++) {
-                            let chatdata = new Map();
-                            chatdata = await Chat.findOne({_id: result.chats[1].pending[i]}).lean();
-                            if (chatdata) {
-                                chatdata.pending = "true";
-                                chatsArray.push(chatdata);
-                            }
+        async function getPendingChats(chatsArray, chatdata) {
+            if (user) {
+                if (user.chats[1]) {
+                    for (let i = 0; i < user.chats[1].pending.length; i++) {
+                        let chatdata = new Map();
+                        chatdata = await Chat.findOne({_id: user.chats[1].pending[i]}).lean();
+                        if (chatdata) {
+                            chatdata.pending = "true";
+                            chatsArray.push(chatdata);
+                            return chatsArray;
                         }
                     }
                 }
-                return chatsArray;
             }
+            return chatsArray;
+        }
 
-            getChats().then(function(chatsArray) {
-                getPendingChats().then(function(chatsArray) { // Chats array variable holds objects of chat arrays
-                    res.json(chatsArray); // List of chats for a user is sent to the user in json format.
+        if (user) {
+            return await getChats(chatsArray)
+                .then((chatsArray) => {
+                    return getPendingChats(chatsArray)
+                .then((chatsArray) => { // Chats array variable holds objects of chat arrays
+                    if (req.body.getconversations) {
+                        return chatsArray; // List of chats for a user is sent to the user in json format.
+                    } else {
+                        return res.json(chatsArray); // Respond directly to client if respondToClient not set to false
+                    }
                 });
             });
-        }).lean();
+        } else {
+            return chatsArray;
+        }
+
     }
 
     //
@@ -1173,16 +1185,22 @@ module.exports = function(io) {
         // res.json(await neo.fetchSingleArticleData(req.body.id));
     }
 
-    const getfriends = (req, res, next) => {
-        User.findOne({username: req.body.username}, {username: 1, friends: 1} , function(err, result) {
+    const getfriends = async (req, res, next) => {
+        User.findOne({username: req.body.username}, {username: 1, friends: 1} , async (err, result) => {
             if (err) throw err;
-            let userfriendslist;
+            let data = {
+                userfriendslist: [],
+                conversations: []
+            }
             if (result) {
                 if (result.friends) {
-                    userfriendslist = result.friends[0].confirmed;
+                    data.userfriendslist = result.friends[0].confirmed;
                 }
+                req.body.getconversations = true;
+                data.conversations = await getconversationlogs(req, res, next);
+                return res.json(data);
             }
-            return res.json(userfriendslist);
+            return res.json(data);
         }).lean();
     }
 

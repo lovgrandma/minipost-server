@@ -128,7 +128,6 @@ const checkFriends = async (user) => {
         if (user && typeof user === 'string') {
             if (user.length > 0) {
                 let userDoc = await User.findOne({username: user}).lean();
-                console.log(userDoc);
                 if (userDoc) {
                     const mongoFriends = userDoc.friends[0].confirmed;
                     const session = driver.session();
