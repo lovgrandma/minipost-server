@@ -290,7 +290,7 @@ const mergeOneFriendEdge = async (user, to) => {
 /** Creates or updates one video record in graph db. Returns full record
 Requires user, users uuid and mpd. Other methods must be empty string or in tags case must be empty array.
 */
-const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate) => {
+const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
     if (user && mpd) {
         let videoCreateProcessComplete = checkUserExists(user)
         .then(async (result) => {
@@ -308,15 +308,26 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 let query = "create (a:Video { mpd: $mpd, author: $author, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0 }) return a";
                 let params = { mpd: mpd, author: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags };
                 const videoRecordCreated = await session.run(query, params)
-                    .then((record) => {
+                    .then(async (record) => {
                         session.close();
-                        return record;
-                    })
-                    .then((record) => {
-                        session = driver.session();
+                        let session2 = driver.session();
                         // Will merge author node to just created video node in neo4j
                         query = "match (a:Person {name: $author}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
-                        session.run(query, params);
+                        session2.run(query, params);
+                        return record;
+                    })
+                    .then(async (record) => {
+                        if (responseTo) {
+                            let session3 = driver.session();
+                            params = { mpd: mpd, responseTo: responseTo };
+                            if (responseType == "video") {
+                                query = "match (a:Video { mpd: $mpd}), (b:Video { mpd: $responseTo}) merge (b)-[r:RESPONSE]->(a)";
+                                session3.run(query, params);
+                            } else if (responseType == "article") {
+                                query = "match (a:Video { mpd: $mpd}), (b:Article { id: $responseTo}) merge (b)-[r:RESPONSE]->(a)";
+                                session3.run(query, params);
+                            }
+                        }
                         return record;
                     });
                 return videoRecordCreated;
@@ -397,18 +408,11 @@ const createOneArticle = async (article) => {
                         if (createdArticle.records.length > 0) {
                             return true;
                         }
-                    } else {
-                        return false;
                     }
-                } else {
-                    return false;
                 }
-            } else {
-                return false;
             }
-        } else {
-            return false;
         }
+        return false;
     } catch (err) {
         return false;
     }
@@ -438,13 +442,14 @@ const deleteOneArticle = async (id) => {
 const fetchSingleVideoData = async (mpd) => {
     let session = driver.session();
     // Must query for original video and potential relational matches to articles. Not either/or or else query will not function properly
-    let query = "match (a:Video {mpd: $mpd}) optional match (a:Video {mpd: $mpd})-[r:RESPONSE]->(b:Article) return a, r, b";
+    let query = "match (a:Video {mpd: $mpd}) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c";
     let params = { mpd: mpd };
     let data = {
         video: {},
         relevantVideos: [],
         articleResponses: [],
-        videoResponses: []
+        videoResponses: [],
+        responseTo: {}
     }
     data.video = await session.run(query, params)
         .then(async (result) => {
@@ -460,36 +465,68 @@ const fetchSingleVideoData = async (mpd) => {
                 dislikes: "",
                 views: ""
             }
-            if (result.records[0]) {
-                if (result.records[0]._fields[0]) {
-                    video.author = result.records[0]._fields[0].properties.author.toString();
-                    video.title = result.records[0]._fields[0].properties.title.toString();
-                    video.description = result.records[0]._fields[0].properties.description.toString();
-                    video.tags = result.records[0]._fields[0].properties.tags;
-                    video.published = result.records[0]._fields[0].properties.publishDate;
-                    video.likes = result.records[0]._fields[0].properties.likes.toNumber();
-                    video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
-                    video.views = result.records[0]._fields[0].properties.views.toNumber();
-                    // Append article responses of this video to articleResponses data member
-                    for (let i = 0; i < result.records.length; i++) {
-                        if (result.records[i]) {
-                            if (result.records[i]._fields[2]) {
-                                if (result.records[i]._fields[2].properties) {
-                                    result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
-                                    result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
-                                    result.records[i]._fields[2].properties.reads = parseInt(result.records[i]._fields[2].properties.reads);
-                                    data.articleResponses.push(result.records[i]._fields[2].properties);
+            // For each result records are stored in the chronological order that you return variables.
+            // Here there are 4 variables. result.records[0]._fields[0] should store the original record a you are looking for
+            // result.records[0]._fields[1] contains relationship info. This is generally not needed.
+            // result.records[i]._fields[2] contains b, the responses of a. Iterate through result.records[i].fields[2] for all responses video and article.
+            // result.records[i]._fields[2].labels[0] stores whether document is Article or Video
+            // result.records[0]._fields[3] contains c. This is the original document this document is responding to
+            if (result) {
+                if (result.records[0]) {
+                    if (result.records[0]._fields[0]) {
+                        if (result.records[0]._fields[0].properties) {
+                            video.author = result.records[0]._fields[0].properties.author.toString();
+                            video.title = result.records[0]._fields[0].properties.title.toString();
+                            video.description = result.records[0]._fields[0].properties.description.toString();
+                            video.tags = result.records[0]._fields[0].properties.tags;
+                            video.published = result.records[0]._fields[0].properties.publishDate;
+                            video.likes = result.records[0]._fields[0].properties.likes.toNumber();
+                            video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
+                            video.views = result.records[0]._fields[0].properties.views.toNumber();
+                            video.mpd = result.records[0]._fields[0].properties.mpd;
+                            // Append article and video responses of this video to articleResponses data member
+                            for (let i = 0; i < result.records.length; i++) { // Only iterate through 3rd field (_fields[2]). That holds cypher variable b
+                                if (result.records[i]) {
+                                    if (result.records[i]._fields[2]) {
+                                        if (result.records[i]._fields[2].properties) {
+                                            if (result.records[i]._fields[2].labels[0] == "Article") {
+                                                result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
+                                                result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
+                                                result.records[i]._fields[2].properties.reads = parseInt(result.records[i]._fields[2].properties.reads);
+                                                data.articleResponses.push(result.records[i]._fields[2].properties);
+                                            } else if (result.records[i]._fields[2].labels[0] == "Video" && result.records[i]._fields[2].properties.mpd != video.mpd) {
+                                                result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
+                                                result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
+                                                result.records[i]._fields[2].properties.views = parseInt(result.records[i]._fields[2].properties.views);
+                                                data.videoResponses.push(result.records[i]._fields[2].properties);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
+                        if (result.records[0]._fields[3]) { // Only look 4th field (_fields[3]) That holds cypher variable c. Parent document is responding to
+                            if (result.records[0]._fields[3].properties) {
+                                if (result.records[0]._fields[3].labels[0] == "Video") {
+                                    result.records[0]._fields[3].properties.likes = parseInt(result.records[0]._fields[3].properties.likes);
+                                    result.records[0]._fields[3].properties.dislikes = parseInt(result.records[0]._fields[3].properties.dislikes);
+                                    result.records[0]._fields[3].properties.views = parseInt(result.records[0]._fields[3].properties.views);
+                                    result.records[0]._fields[3].properties.type = "video";
+                                    data.responseTo = result.records[0]._fields[3].properties;
+                                } else if (result.records[0]._fields[3].labels[0] == "Article") {
+                                    result.records[0]._fields[3].properties.likes = parseInt(result.records[0]._fields[3].properties.likes);
+                                    result.records[0]._fields[3].properties.dislikes = parseInt(result.records[0]._fields[3].properties.dislikes);
+                                    result.records[0]._fields[3].properties.reads = parseInt(result.records[0]._fields[3].properties.reads);
+                                    result.records[0]._fields[3].properties.type = "article";
+                                    data.responseTo = result.records[0]._fields[3].properties;
+                                }
+                            }
+                        }
+                        return video;
                     }
-                    return video;
-                } else {
-                    return video;
                 }
-            } else {
-                return video;
             }
+            return video;
         })
         .then(async (result) => {
             result.mpd = await cloudfrontconfig.serveCloudfrontUrl(mpd);
@@ -498,6 +535,88 @@ const fetchSingleVideoData = async (mpd) => {
     return data;
 };
 
+const fetchSingleArticleData = async (id) => {
+    let session = driver.session();
+    let query = "match (a:Article {id: $id}) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c";
+    let params = {id};
+    let data = {
+        article: {},
+        relevantArticles: [],
+        articleResponses: [],
+        videoResponses: [],
+        responseTo: []
+    }
+    data.article = await session.run(query, params)
+        .then(async (result) => {
+            session.close();
+            let article = {
+                id: "",
+                author: "",
+                title: "",
+                body: "",
+                published: "",
+                likes: "",
+                dislikes: "",
+                reads: ""
+            }
+            if (result) {
+                if (result.records[0]) {
+                    if (result.records[0]._fields[0]) {
+                        if (result.records[0]._fields[0].properties) {
+                            article.id = result.records[0]._fields[0].properties.id;
+                            article.author = result.records[0]._fields[0].properties.author.toString();
+                            article.title = result.records[0]._fields[0].properties.title.toString();
+                            article.body = result.records[0]._fields[0].properties.body.toString();
+                            article.published = result.records[0]._fields[0].properties.publishDate;
+                            article.likes = result.records[0]._fields[0].properties.likes.toNumber();
+                            article.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
+                            article.reads = result.records[0]._fields[0].properties.reads.toNumber();
+                            // Append article responses of this article to articleResponses data member
+                            for (let i = 0; i < result.records.length; i++) {
+                                if (result.records[i]) {
+                                    if (result.records[i]._fields[2]) {
+                                        if (result.records[i]._fields[2].properties) {
+                                            if (result.records[i]._fields[2].labels[0] == "Article" && result.records[i]._fields[2].properties.id != article.id) {
+                                                result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
+                                                result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
+                                                result.records[i]._fields[2].properties.reads = parseInt(result.records[i]._fields[2].properties.reads);
+                                                data.articleResponses.push(result.records[i]._fields[2].properties);
+                                            } else if (result.records[i]._fields[2].labels[0] == "Video") {
+                                                result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
+                                                result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
+                                                result.records[i]._fields[2].properties.views = parseInt(result.records[i]._fields[2].properties.views);
+                                                data.videoResponses.push(result.records[i]._fields[2].properties);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (result.records[0]._fields[3]) { // Only look 4th field (_fields[3]) That holds cypher variable c. Parent document is responding to
+                            if (result.records[0]._fields[3].properties) {
+                                if (result.records[0]._fields[3].labels[0] == "Video") {
+                                    result.records[0]._fields[3].properties.likes = parseInt(result.records[0]._fields[3].properties.likes);
+                                    result.records[0]._fields[3].properties.dislikes = parseInt(result.records[0]._fields[3].properties.dislikes);
+                                    result.records[0]._fields[3].properties.views = parseInt(result.records[0]._fields[3].properties.views);
+                                    result.records[0]._fields[3].properties.type = "video";
+                                    data.responseTo = result.records[0]._fields[3].properties;
+                                } else if (result.records[0]._fields[3].labels[0] == "Article") {
+                                    result.records[0]._fields[3].properties.likes = parseInt(result.records[0]._fields[3].properties.likes);
+                                    result.records[0]._fields[3].properties.dislikes = parseInt(result.records[0]._fields[3].properties.dislikes);
+                                    result.records[0]._fields[3].properties.reads = parseInt(result.records[0]._fields[3].properties.reads);
+                                    result.records[0]._fields[3].properties.type = "article";
+                                    data.responseTo = result.records[0]._fields[3].properties;
+                                }
+                            }
+                        }
+                        return article;
+                    }
+                }
+            }
+            return article;
+        })
+    return data;
+}
 /** Experimental high frequency increment video views on redis database. Returns boolean */
 const incrementVideoView = async (mpd) => {
     let videoExists = await checkVideoExists(mpd);
@@ -552,5 +671,6 @@ module.exports = { checkFriends: checkFriends,
                  createOneArticle: createOneArticle,
                  deleteOneArticle: deleteOneArticle,
                  fetchSingleVideoData: fetchSingleVideoData,
+                 fetchSingleArticleData: fetchSingleArticleData,
                  incrementVideoView: incrementVideoView,
                  createOneUser: createOneUser };

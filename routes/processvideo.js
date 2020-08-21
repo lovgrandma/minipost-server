@@ -60,7 +60,6 @@ const store = new MongoDBStore(
 
 let io = null;
 const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, socket, job) {
-    console.log(job.id);
     /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
                 */
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
@@ -409,7 +408,7 @@ const deleteOne = async (filePath) => {
             }
         }
     } catch (err) {
-        console.log(err);
+        // File did not delete or was already deleted
     }
 }
 

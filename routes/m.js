@@ -121,6 +121,7 @@ module.exports = function(io) {
         io.sockets.to(socketRoomNum).emit("uploadUpdate", message);
     }
 
+    // Runs tellSocket method which will tell appropriate socket video process information
     videoQueue.on('progress', function(job, progress) {
         tellSocket(progress);
     });
@@ -280,11 +281,13 @@ module.exports = function(io) {
                     let desc = req.body.desc;
                     let nudity = req.body.nudity;
                     let tags = [...req.body.tags];
+                    let responseTo = req.body.responseTo;
+                    let responseType = req.body.responseType;
                     if (videoRecord && userRecord) {
                         let publishDate = new Date().toLocaleString();
                         Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
                             let userUpdated;
-                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate);
+                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType);
                             let mpd = "";
                             if (graphRecordUpdated.records) {
                                 if (graphRecordUpdated.records[0]) {
@@ -302,7 +305,6 @@ module.exports = function(io) {
                             if (!err) {
                                 User.findOne({ username: req.body.user }, async function(err, user) {
                                     if (err) {
-                                        console.log(err);
                                         // "Error finding user in mongoDb"
                                     } else {
                                         let foundOne = false;
@@ -1181,8 +1183,7 @@ module.exports = function(io) {
 
     // Fetches page data for single article page
     const fetchArticlePageData = async (req, res, next) => {
-        console.log(req.body.id);
-        // res.json(await neo.fetchSingleArticleData(req.body.id));
+        res.json(await neo.fetchSingleArticleData(req.body.id));
     }
 
     const getfriends = async (req, res, next) => {
