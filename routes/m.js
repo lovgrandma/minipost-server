@@ -60,7 +60,7 @@ module.exports = function(io) {
             if (progress._progress.match(/video ready/)) {
                 if (progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] == job.data.generatedUuid) {
                     console.log(progress._progress.match(/([a-z0-9]*);([a-z0-9 ]*)/)[1] + " complete");
-                    console.log(await videoQueue.getJobCounts());
+                    // After process is completed, logging await videoQueue.getJobCounts() should show 1 less job running.
                 }
             }
         });

@@ -42,7 +42,7 @@ const createObj = (obj) => {
 
 // connect mongoose
 mongoose.connect('mongodb://localhost:27017/minireel')
-    .then(() => console.log('MongoDB Connected'))
+    .then(() => console.log('MongoDB Connected(processvideo.js)'))
     .catch(err => console.log(err));
 
 const db = mongoose.connection;
@@ -60,8 +60,7 @@ const store = new MongoDBStore(
 
 let io = null;
 const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, encodeAudio, room, body, socket, job) {
-    /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings.
-                */
+    /* If encode audio is set to true, encode audio and run convertVideos at same iteration, then set encode audio to false at same iteration. Add support in future for multiple audio encodings. */
     if (i < resolutions.length) { // Convert if iteration is less than the length of resolutions constant array
         try {
             let process = new ffmpeg(originalVideo, {maxBuffer: 512 * 1000});
@@ -78,9 +77,8 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                         if (audio.metadata.audio.channels.value == null || audio.metadata.audio.channels.value == 0) {
                             audio.addCommand('-ac', '6'); // If channels value is null or equal to 0, convert to surround sound
                         }
-                        audio.save("./" + rawPath, async function (err, file) {
+                        audio.save("./" + rawPath, async function (err, file) { // Creates audio file at path specified. Log file for path.
                             if (!err) {
-                                console.log('Audio file: ' + file);
                                 objUrls.push({
                                     "path" : rawPath,
                                     "detail" : "aac"
@@ -115,13 +113,12 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                     video.addCommand('-crf', '24');
                     video.addCommand('-tune', 'film');
                     video.addCommand('-x264-params', 'keyint=24:min-keyint=24:no-scenecut');
-                    video.save("./" + rawPath, async function (err, file) {
+                    video.save("./" + rawPath, async function (err, file) { // Creates new file at path specified. Log file for file location
                         objUrls.push({
                             "path" : rawPath,
                             "detail" : resolutions[i]
                         });
                         if (!err) {
-                            console.log('Video file: ' + file);
                             return convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                         } else {
                             console.log(err);
@@ -146,8 +143,8 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
     return objUrls;
 }
 
+// This produces the mpd with all relevant relative pathing to files and other details
 const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid, socket, job) {
-    console.log("Generating Mpd");
     const exec_options = {
         cwd: null,
         env: null,
@@ -183,7 +180,8 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         }
         const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd";
         args += "--mpd_output " + relative + expectedMpdPath;
-        console.log(command + " " + args);
+        // command + " " + args
+        // Log above variables to see full child process command to be run
         let data = cp.exec(command + " " + args, {maxBuffer: 1024 * 8000}, function(err, stdout, stderr) { // 8000kb max buffer
             if (err) {
                 console.log("Something went wrong, mpd was not created");
@@ -251,7 +249,6 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                 console.log(uploadData);
                 if (data) {
                     if (i == objUrls.length-1) {
-                        console.log("Upload to S3 Complete");
                         delArr.push(...objUrls, ...rawObjUrls);
                         makeVideoRecord(s3Objects, body, room, generatedUuid, socket, job, delArr, originalVideo);
                         if (io) {
@@ -370,7 +367,7 @@ const deleteVideoArray = function(videos, original, room, delay) {
 }
 
 // Cleanly deletes redis record
-const deleteRedisRecord = async (job) => {
+const deleteRedisRecord = async (job, room) => {
     const searchQuery = "*:video transcoding:" + job.id;
     redisclient.keys(searchQuery, (err, reply) => {
         if (reply) {
@@ -379,11 +376,21 @@ const deleteRedisRecord = async (job) => {
             })
         }
     })
+    if (room) {
+        const roomSearchQuery = room;
+        redisclient.keys(roomSearchQuery, (err, reply) => {
+            if (reply) {
+                reply.forEach((el, i) => {
+                    redisclient.del(reply[i]);
+                })
+            }
+        })
+    }
 }
 
 /* Completes job and sends message to remove job from queue */
 const deleteJob = async (complete, job, mpd, room) => {
-    deleteRedisRecord(job);
+    deleteRedisRecord(job, room);
     if (complete && mpd) {
         job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
         job.moveToCompleted();
