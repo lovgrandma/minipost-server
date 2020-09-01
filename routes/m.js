@@ -80,13 +80,13 @@ module.exports = function(io) {
                     job.getState().then(function(result) {
                         if (result) {
                             if (result == 'waiting') {
-                                if (job.attemptsMade < 2 && job.attemptsMade > 0) {
+                                if (job.attemptsMade < 3 && job.attemptsMade > 0) {
                                     try {
                                         job.retry();
                                     } catch (err) {
                                         console.log(err);
                                     }
-                                } else if (job.attemptsMade > 0) {
+                                } else if (job.attemptsMade > 1) {
                                     job.moveToFailed();
                                     job.discard();
                                 }
@@ -105,8 +105,12 @@ module.exports = function(io) {
     })
 
     videoQueue.on('completed', function(job, result) {
-        if (job) {
-            job.remove();
+        try {
+            if (job) {
+                job.remove();
+            }
+        } catch (err) {
+            console.log(err);
         }
     })
 
@@ -228,7 +232,7 @@ module.exports = function(io) {
                                                             removeOnComplete: true,
                                                             removeOnFail: true,
                                                             timeout: 7200000,
-                                                            attempts: 1
+                                                            attempts: 2
                                                         });
                                                     } else {
                                                         if (!ranOnce) {
@@ -591,12 +595,11 @@ module.exports = function(io) {
                                         let options = {
                                             maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
                                             signed: true,
+                                            path: '/'
                                         }
                                         neo.createOneUser(user.username, user._id);
-                                        if (req.cookies.loggedIn === undefined) {
-                                            (res.cookie('loggedIn', user.username, [options]));
-                                        }
-                                        return res.json({querystatus: "loggedin"});
+                                        res.cookie('loggedIn', user.username, [options]);
+                                        return res.json({querystatus: "loggedin", user: user.username });
                                     }
                                 });
                             } else {

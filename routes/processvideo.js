@@ -145,23 +145,23 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
 
 // This produces the mpd with all relevant relative pathing to files and other details
 const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid, socket, job) {
-    const exec_options = {
-        cwd: null,
-        env: null,
-        encoding: 'utf8',
-        timeout: 0,
-        maxBuffer: 200 * 1024
-    };
-
-    const relative = "../../../../";
-    const captureName = /([a-z].*)\/([a-z0-9].*)-/;
-    const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
     let delArr = [];
-    const rawObjUrls = [];
-    for (let i = 0; i < objUrls.length; i++) {
-        rawObjUrls[i] = createObj(objUrls[i]);
-    }
     try {
+        const exec_options = {
+            cwd: null,
+            env: null,
+            encoding: 'utf8',
+            timeout: 0,
+            maxBuffer: 200 * 1024
+        };
+
+        const relative = "../../../../";
+        const captureName = /([a-z].*)\/([a-z0-9].*)-/;
+        const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
+        const rawObjUrls = [];
+        for (let i = 0; i < objUrls.length; i++) { // Go through all uri's and create references in array to all raw obj uri's
+            rawObjUrls[i] = createObj(objUrls[i]);
+        }
         let command = "cd scripts/src/out/Release && packager.exe";
         let args = "";
         for (obj of objUrls) {
@@ -366,7 +366,7 @@ const deleteVideoArray = function(videos, original, room, delay) {
     }
 }
 
-// Cleanly deletes redis record
+// Cleanly deletes redis record. This must be called after job has been moved to completed to ensure that bull does not throw "key for job lock is missing" error
 const deleteRedisRecord = async (job, room) => {
     const searchQuery = "*:video transcoding:" + job.id;
     redisclient.keys(searchQuery, (err, reply) => {
@@ -390,7 +390,6 @@ const deleteRedisRecord = async (job, room) => {
 
 /* Completes job and sends message to remove job from queue */
 const deleteJob = async (complete, job, mpd, room) => {
-    deleteRedisRecord(job, room);
     if (complete && mpd) {
         job.progress(room + ";video ready;" + servecloudfront.serveCloudfrontUrl(mpd));
         job.moveToCompleted();
@@ -398,6 +397,9 @@ const deleteJob = async (complete, job, mpd, room) => {
         job.progress(room + ";video process failed;null");
         job.moveToFailed();
     }
+    setTimeout(() => {
+        deleteRedisRecord(job, room);
+    }, 500);
 }
 
 /* Deletes one file cleanly */
