@@ -67,6 +67,18 @@ const serveRandomTrendingVideos = async (user = "") => {
             session.close();
             if (result) {
                 let graphRecords = result.records;
+                // Remove all records with empty titles. This will remove videos that have been uploaded to db but have not yet been published by user
+                graphRecords.forEach((record, i) => {
+                    if (record._fields) {
+                        if (record._fields[0]) {
+                            if (record._fields[0].properties) {
+                                if (!record._fields[0].properties.title) {
+                                    graphRecords.splice(i, 1);
+                                }
+                            }
+                        }
+                    }
+                })
                 graphRecords.forEach((record, i) => {
                     graphRecords[i]._fields[0].properties.articles = [];
                     let found = 0;
@@ -305,14 +317,14 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
             session = driver.session();
             /* If result is null, create new video else update existing video in graph db */
             if (!result) {
-                let query = "create (a:Video { mpd: $mpd, author: $author, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0 }) return a";
-                let params = { mpd: mpd, author: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags };
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0 }) return a";
+                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags };
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {
                         session.close();
                         let session2 = driver.session();
                         // Will merge author node to just created video node in neo4j
-                        query = "match (a:Person {name: $author}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        query = "match (a:Person {name: $user}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
                         session2.run(query, params);
                         return record;
                     })
@@ -344,6 +356,15 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 }
                 addedOne > 0 ? query += ", " : null;
                 addedOne = 0;
+                if (publishDate) {
+                    if (publishDate.length > 0) {
+                        query += "publishDate: $publishDate";
+                        params.publishDate = publishDate;
+                        addedOne++;
+                    }
+                }
+                addedOne > 0 ? query += ", " : null;
+                addedOne = 0;
                 if (description) {
                     if (description.length > 0) {
                         query += "description: $description";
@@ -368,6 +389,28 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 }
                 query += " } return a";
                 const videoRecordUpdated = await session.run(query, params)
+                    .then(async (record) => {
+                        session.close();
+                        let session2 = driver.session();
+                        // Will merge author node to just created video node in neo4j
+                        query = "match (a:Person {name: $user}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        session2.run(query, params);
+                        return record;
+                    })
+                    .then(async (record) => {
+                        if (responseTo) {
+                            let session3 = driver.session();
+                            params = { mpd: mpd, responseTo: responseTo };
+                            if (responseType == "video") {
+                                query = "match (a:Video { mpd: $mpd}), (b:Video { mpd: $responseTo}) merge (b)-[r:RESPONSE]->(a)";
+                                session3.run(query, params);
+                            } else if (responseType == "article") {
+                                query = "match (a:Video { mpd: $mpd}), (b:Article { id: $responseTo}) merge (b)-[r:RESPONSE]->(a)";
+                                session3.run(query, params);
+                            }
+                        }
+                        return record;
+                    });
                 return videoRecordUpdated;
             }
         })

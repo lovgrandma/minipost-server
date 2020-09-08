@@ -12,6 +12,7 @@ const mongoose = require('mongoose');
 const session = require('express-session');
 const uuidv4 = require('uuid/v4');
 const MongoDBStore = require('connect-mongodb-session')(session);
+const neo = require('./neo.js');
 
 const User = require('../models/user');
 const Chat = require('../models/chat');
@@ -303,6 +304,9 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                 // Updates user record based on whether or not video document is waiting for info (has a title) or not.
                 let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
                 if (await userVideoRecord) {
+                    // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
+                    let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
+                    neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null);
                     deleteJob(true, job, mpd, room); // Success
                     deleteVideoArray(delArr, originalVideo, room, 10000);
                 }
