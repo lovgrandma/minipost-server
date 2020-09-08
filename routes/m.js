@@ -14,7 +14,6 @@ const router = express.Router();
 const uuidv4 = require('uuid/v4');
 const ffmpeg = require('ffmpeg');
 const Bull = require('bull');
-const neo = require('./neo.js');
 
 const redisApp = require('../redis');
 const redisclient = redisApp.redisclient;
@@ -26,6 +25,8 @@ const Article = require('../models/article');
 const processvideo = require('./processvideo.js');
 const maintenance = require('./queuemaintenance.js');
 const cloudfrontconfig = require('./servecloudfront');
+const neo = require('./neo.js');
+const processimage = require('./processimage.js');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 maintenance.queueMaintenance(videoQueue);
@@ -45,7 +46,7 @@ module.exports = function(io) {
         process.env.PRIVATE_KEY
     );
 
-    /* Uploads single video to temporary storage to be used to check if video is viable for converting */
+    /* Uploads single video or image or file to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
         storage: multer.diskStorage({
             destination: './temp/',
@@ -277,6 +278,8 @@ module.exports = function(io) {
 
     /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db, also merges relationship in neo4j (author)-[PUBLISHED]->(video) */
     const publishVideo = async (req, res, next) => {
+        let image = path.parse(req.file.filename);
+        let thumbnailUrl = './temp/' + image.name + "." + req.body.extension;
         try {
             if (req.body.title && req.body.user && req.body.mpd) {
                 if (req.body.title.length > 0 && req.body.mpd.length > 0) {
@@ -287,11 +290,12 @@ module.exports = function(io) {
                     let tags = [...req.body.tags];
                     let responseTo = req.body.responseTo;
                     let responseType = req.body.responseType;
+                    let serverThumbnailUrl = await processimage.processThumb(thumbnailUrl);
                     if (videoRecord && userRecord) {
                         let publishDate = new Date().toLocaleString();
                         Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
                             let userUpdated;
-                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType);
+                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType, serverThumbnailUrl);
                             let mpd = "";
                             if (graphRecordUpdated.records) {
                                 if (graphRecordUpdated.records[0]) {
@@ -344,6 +348,7 @@ module.exports = function(io) {
                 }
             }
         } catch (err) {
+            console.log(err);
             res.json({ querystatus: "error publishing/updating"});
         }
     }
@@ -1511,7 +1516,7 @@ module.exports = function(io) {
         return beginchat(req, res, next);
     });
 
-    router.post('/publishvideo', (req, res, next) => {
+    router.post('/publishvideo', uploadCheck.single('image'), (req, res, next) => {
         return publishVideo(req, res, next);
     });
 

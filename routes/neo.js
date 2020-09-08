@@ -302,7 +302,7 @@ const mergeOneFriendEdge = async (user, to) => {
 /** Creates or updates one video record in graph db. Returns full record
 Requires user, users uuid and mpd. Other methods must be empty string or in tags case must be empty array.
 */
-const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
+const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType, thumbnailUrl = null) => {
     if (user && mpd) {
         let videoCreateProcessComplete = checkUserExists(user)
         .then(async (result) => {
@@ -317,8 +317,14 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
             session = driver.session();
             /* If result is null, create new video else update existing video in graph db */
             if (!result) {
-                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0 }) return a";
-                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags };
+                if (!description) {
+                    description = "";
+                }
+                if (!tags) {
+                    tags = [];
+                }
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, thumbnailUrl: $thumbnailUrl }) return a";
+                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl };
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {
                         session.close();
@@ -360,6 +366,15 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                     if (publishDate.length > 0) {
                         query += "publishDate: $publishDate";
                         params.publishDate = publishDate;
+                        addedOne++;
+                    }
+                }
+                addedOne > 0 ? query += ", " : null;
+                addedOne = 0;
+                if (thumbnailUrl) {
+                    if (thumbnailUrl.length > 0) {
+                        query += "thumbnailUrl: $thumbnailUrl";
+                        params.thumbnailUrl = thumbnailUrl;
                         addedOne++;
                     }
                 }
@@ -482,6 +497,19 @@ const deleteOneArticle = async (id) => {
     }
 }
 
+// Sometimes there can be records with empty fields. This will ensure that errors do not occur when trying to access nonexistent data members
+const resolveEmptyData = (record, type, dataType = "string") => {
+    let placeholder = "";
+    if (dataType == "number") {
+        placeholder = 0;
+    } else if (dataType == "array") {
+        placeholder = [];
+    }
+    if (!record._fields[0].properties[type]) {
+        return record._fields[0].properties[type] = placeholder;
+    }
+}
+
 const fetchSingleVideoData = async (mpd) => {
     let session = driver.session();
     // Must query for original video and potential relational matches to articles. Not either/or or else query will not function properly
@@ -520,8 +548,8 @@ const fetchSingleVideoData = async (mpd) => {
                         if (result.records[0]._fields[0].properties) {
                             video.author = result.records[0]._fields[0].properties.author.toString();
                             video.title = result.records[0]._fields[0].properties.title.toString();
-                            video.description = result.records[0]._fields[0].properties.description.toString();
-                            video.tags = result.records[0]._fields[0].properties.tags;
+                            video.description = resolveEmptyData(result.records[0], "description");
+                            video.tags = resolveEmptyData(result.records[0], "tags", "array");
                             video.published = result.records[0]._fields[0].properties.publishDate;
                             video.likes = result.records[0]._fields[0].properties.likes.toNumber();
                             video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
