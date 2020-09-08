@@ -505,9 +505,19 @@ const resolveEmptyData = (record, type, dataType = "string") => {
     } else if (dataType == "array") {
         placeholder = [];
     }
-    if (!record._fields[0].properties[type]) {
-        return record._fields[0].properties[type] = placeholder;
+    if (!record._fields[0].properties[type] || record._fields[0].properties[type] == null) {
+        return placeholder;
+    } else {
+        if (dataType == "array") { // Tags data may not be stored properly. May be stored as comma seperated strings or as array. Conditionally return data for both
+            if (Array.isArray(record._fields[0].properties[type])) {
+                return record._fields[0].properties[type];
+            } else {
+                return record._fields[0].properties[type].split(",");
+            }
+        }
+        return record._fields[0].properties[type];
     }
+    return "";
 }
 
 const fetchSingleVideoData = async (mpd) => {
@@ -548,8 +558,8 @@ const fetchSingleVideoData = async (mpd) => {
                         if (result.records[0]._fields[0].properties) {
                             video.author = result.records[0]._fields[0].properties.author.toString();
                             video.title = result.records[0]._fields[0].properties.title.toString();
-                            video.description = resolveEmptyData(result.records[0], "description");
-                            video.tags = resolveEmptyData(result.records[0], "tags", "array");
+                            video.description = resolveEmptyData(result.records[0], "description"); // Unrequired data member
+                            video.tags = resolveEmptyData(result.records[0], "tags", "array"); // Unrequired data member
                             video.published = result.records[0]._fields[0].properties.publishDate;
                             video.likes = result.records[0]._fields[0].properties.likes.toNumber();
                             video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();

@@ -287,7 +287,7 @@ module.exports = function(io) {
                     let userRecord = await User.findOne({ username: req.body.user }).lean();
                     let desc = req.body.desc;
                     let nudity = req.body.nudity;
-                    let tags = [...req.body.tags];
+                    let tags = req.body.tags;
                     let responseTo = req.body.responseTo;
                     let responseType = req.body.responseType;
                     let serverThumbnailUrl = await processimage.processThumb(thumbnailUrl);
@@ -1199,7 +1199,8 @@ module.exports = function(io) {
             if (err) throw err;
             let data = {
                 userfriendslist: [],
-                conversations: []
+                conversations: [],
+                cloud: s3Cred.cdn.cloudFront1
             }
             if (result) {
                 if (result.friends) {
