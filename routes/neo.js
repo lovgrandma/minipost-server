@@ -26,7 +26,7 @@ Serving video recommendations based on similar people and friends requires for f
 
 This method should return up to 100 video mpds, titles, authors, descriptions, date, views and thumbnail locations every time it runs.
 */
-const serveVideoRecommendations = async (user = "") => {
+const serveVideoRecommendations = async (user = "", append = []) => {
     let videoArray = [];
     if (user) {
         if (user.length > 0) {
@@ -37,6 +37,9 @@ const serveVideoRecommendations = async (user = "") => {
                 return true;
             })
             .then( async (result) => {
+                if (append.length > 0) {
+                    return await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
+                }
                 return await serveRandomTrendingVideos(user);
             });
         } else {
@@ -60,11 +63,13 @@ This is a fallback method incase recommendation system cannot find enough unique
 */
 const serveRandomTrendingVideos = async (user = "") => {
     const session = driver.session();
-    //const query = "MATCH (a:Video) OPTIONAL MATCH (a)-[r:RESPONSE*]-(b:Article) RETURN a, r, b ORDER BY a.views DESC limit 50";
-    const query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC limit 50";
-    let getHighestTrending = session.run(query)
+    // Do not be confused by following returning 5 videos on client side. The first match will be doubled and removed when Video-RESPONSE-article query is matched
+    let skip = Math.round(Math.random() * 10);
+    let query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC SKIP $skip LIMIT 100";
+    console.log(skip);
+    let params = { skip: neo4j.int(skip) };
+    let getHighestTrending = await session.run(query, params)
         .then(async (result) => {
-            session.close();
             if (result) {
                 let graphRecords = result.records;
                 // Remove all records with empty titles. This will remove videos that have been uploaded to db but have not yet been published by user
@@ -105,6 +110,8 @@ const serveRandomTrendingVideos = async (user = "") => {
                     graphRecords[i]._fields[0].properties.views = views;
                 });
                 if (graphRecords) {
+                    graphRecords = utility.shuffleArray(graphRecords);
+                    graphRecords = graphRecords.slice(0, 10);
                     return graphRecords;
                 } else {
                     return false;
@@ -398,10 +405,8 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 }
                 addedOne > 0 ? query += ", " : null;
                 addedOne = 0;
-                if (tags) {
-                    query += "tags: $tags";
-                    params.tags = tags;
-                }
+                query += "tags: $tags";
+                params.tags = tags;
                 query += " } return a";
                 const videoRecordUpdated = await session.run(query, params)
                     .then(async (record) => {
@@ -745,6 +750,40 @@ const setVideoViewsNeo = async (mpd, value) => {
     } catch (err) {
         return false;
     }
+}
+
+// When concatting two arrays of media together, check to see if duplicates are present before merging. Used for appending more videos to client dash
+const removeDuplicates = async (media, type = "video") => {
+    if (type == "video") {
+        for (let i = 0; i < media.length; i++) {
+            let found = 0;
+            if (media[i]) {
+                if (media[i]._fields) {
+                    if (media[i]._fields[0]) {
+                        if (utility.get(media[i]._fields[0], 'properties.mpd')) {
+                            for (let j = 0; j < media.length; j++) {
+                                if (media[j]) {
+                                    if (media[j]._fields) {
+                                        if (media[j]._fields[0]) {
+                                            if (utility.get(media[j]._fields[0], 'properties.mpd')) {
+                                                if (media[i]._fields[0].properties.mpd == media[j]._fields[0].properties.mpd) {
+                                                    if (found > 0) {
+                                                        media.splice(j, 1);
+                                                    }
+                                                    found++;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return media;
 }
 
 module.exports = { checkFriends: checkFriends,

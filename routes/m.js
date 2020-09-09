@@ -354,24 +354,26 @@ module.exports = function(io) {
     }
     
     const serveVideos = async (req, res, next) => {
-        if (req.body.user) {
-            if (req.body.user.length > 0) {
-                let videoRecommendations = await neo.serveVideoRecommendations(req.body.user);
-                if (videoRecommendations) {
-                    return res.json(videoRecommendations);
-                } else {
-                    return res.json({querystatus: 'error retrieving video recommendations'});
-                }
+        try {
+            let videoRecommendations = {
+                main: [],
+                cloud: ""
             }
-        } else {
-            let videoRecommendations = await neo.serveVideoRecommendations();
-            if (videoRecommendations) {
+            videoRecommendations.cloud = s3Cred.cdn.cloudFront1;
+            let user = null;
+            if (req.body.user) {
+                user = req.body.user;
+            }
+            videoRecommendations.main = await neo.serveVideoRecommendations(user, req.body.append);
+            if (videoRecommendations.main) {
                 return res.json(videoRecommendations);
             } else {
                 return res.json({querystatus: 'error retrieving video recommendations'});
             }
+            return res.json({querystatus: 'empty username in video recommendation query'});
+        } catch (err) {
+            return res.json({querystatus: 'error retrieving video recommendations'});
         }
-        return res.json({querystatus: 'empty username in video recommendation query'});
     }
 
 
@@ -581,6 +583,12 @@ module.exports = function(io) {
                         ]
                     }
                 ],
+                likes: [
+
+                ],
+                dislikes: [
+
+                ]
             };
 
             User.findOne({username: req.body.username }, async function(err, result) { // Search for entered user to see if user already exists
@@ -1199,8 +1207,7 @@ module.exports = function(io) {
             if (err) throw err;
             let data = {
                 userfriendslist: [],
-                conversations: [],
-                cloud: s3Cred.cdn.cloudFront1
+                conversations: []
             }
             if (result) {
                 if (result.friends) {
