@@ -565,6 +565,7 @@ const fetchSingleVideoData = async (mpd) => {
                             video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
                             video.views = result.records[0]._fields[0].properties.views.toNumber();
                             video.mpd = result.records[0]._fields[0].properties.mpd;
+                            video.thumbnail = resolveEmptyData(result.records[0], "thumbnailUrl");
                             // Append article and video responses of this video to articleResponses data member
                             for (let i = 0; i < result.records.length; i++) { // Only iterate through 3rd field (_fields[2]). That holds cypher variable b
                                 if (result.records[i]) {
