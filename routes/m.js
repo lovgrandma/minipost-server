@@ -1565,7 +1565,7 @@ module.exports = function(io) {
         return incrementView(req, res, next);
     });
 
-
+    // INCREMENT OR DECREMENT LIKE OR DISLIKE
     router.post('/likedislike', (req, res, next) => {
         return likeDislike(req, res, next);
     });
