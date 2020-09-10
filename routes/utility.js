@@ -83,10 +83,15 @@ function shuffleArray(array) {
   return array;
 }
 
+// Elegantly checks for nested objects without throwing errors
 get = function(obj, key) {
-    return key.split(".").reduce(function(o, x) {
-        return (typeof o == "undefined" || o === null) ? o : o[x];
-    }, obj);
+    try {
+        return key.split(".").reduce(function(o, x) {
+            return (typeof o == "undefined" || o === null) ? o : o[x];
+        }, obj);
+    } catch (err) {
+        return false;
+    }
 }
 
 module.exports = { deepEquals: deepEquals,

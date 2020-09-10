@@ -24,16 +24,13 @@ const Video = require('../models/video');
 /* Serves video recommendations to client
 Serving video recommendations based on similar people and friends requires for friends of a user to be accurately represented in the database. Running checkFriends before running any recommendation logic ensures that users friends are updated in the database
 
-This method should return up to 100 video mpds, titles, authors, descriptions, date, views and thumbnail locations every time it runs.
+This method should return up to 20 video objects (mpds, titles, authors, descriptions, date, views and thumbnail locations) every time it runs.
 */
 const serveVideoRecommendations = async (user = "", append = []) => {
     let videoArray = [];
     if (user) {
         if (user.length > 0) {
             videoArray = checkFriends(user).then((result) => {
-                if (result) {
-                    console.log("preliminary stuff done");
-                }
                 return true;
             })
             .then( async (result) => {
@@ -64,7 +61,7 @@ This is a fallback method incase recommendation system cannot find enough unique
 const serveRandomTrendingVideos = async (user = "") => {
     const session = driver.session();
     // Do not be confused by following returning 5 videos on client side. The first match will be doubled and removed when Video-RESPONSE-article query is matched
-    let skip = Math.round(Math.random() * 10);
+    let skip = Math.floor(Math.random() * 5);
     let query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC SKIP $skip LIMIT 100";
     console.log(skip);
     let params = { skip: neo4j.int(skip) };
@@ -768,6 +765,10 @@ const removeDuplicates = async (media, type = "video") => {
                                             if (utility.get(media[j]._fields[0], 'properties.mpd')) {
                                                 if (media[i]._fields[0].properties.mpd == media[j]._fields[0].properties.mpd) {
                                                     if (found > 0) {
+                                                        // Cycles to check if any articles were missed by appending duplicate record with higher article response count
+                                                        if (media[i]._fields[0].properties.articles.length < media[j]._fields[0].properties.articles.length) {
+                                                            media[i]._fields[0].properties.articles = [...media[j]._fields[0].properties.articles];
+                                                        }
                                                         media.splice(j, 1);
                                                     }
                                                     found++;
