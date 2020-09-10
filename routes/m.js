@@ -1082,6 +1082,12 @@ module.exports = function(io) {
         }
     }
 
+    // Gets chat logs
+
+    // Reminder, pending doesnt mean not friend request, it means the other user has not responded to the chat thus confirming it.
+    // Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
+    // Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
+
     // This method will filter through all the confirmed chats on a user document. It will search the chat database for each chat
     // id and if there is data for that searched chat id add it to the chats array. It sets an attribute "pending"
     // in order to differentiate between pending chats and confirmed chats on the front end when array is returned.
@@ -1221,7 +1227,12 @@ module.exports = function(io) {
         }).lean();
     }
 
-    // Change functionality of this to redis first, mongo second
+    // Sends chat message to a chat document.
+    // If friends, chat doesnt exist, then create chat, make chat confirmed for both
+    // If friends, chat exists, forward chat message to chat document
+    // If not friends, chat doesnt exist, then create chat make chat pending for other user
+    // If not friends, chat exists, forward chat message to chat document, if chat in pending array take chat off pending, put into confirmed.
+    // This will fire if redis fails, otherwise redis will handle chat functionality (live)
     const beginchat = (req, res, next) => {
         let booleans = [];
         let chatdata;
@@ -1444,6 +1455,11 @@ module.exports = function(io) {
         return res.json(false);
     }
 
+    const likeDislike = async (req, res, next) => {
+        console.log(req.body);
+        return res.json(true);
+    }
+
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
         return login(req, res, next);
@@ -1489,67 +1505,73 @@ module.exports = function(io) {
         return getfriends(req, res, next);
     });
 
+    // GET USER VIDEOS FOR UPLOAD PAGE
     router.post('/getUserVideos', (req, res, next) => {
         return getUserVideos(req, res, next);
     })
 
+    // SERVE VIDEOS TO USER DASH
     router.post('/serveVideos', (req, res, next) => {
         return serveVideos(req, res, next);
     });
 
+    // UPLOADS VIDEO TO SERVER USING WORKER PIPELINE (DATA IN MONGO AND NEO4J)
     router.post('/videoupload', uploadCheck.single('video'), async (req, res, next) => {
         return prepareUpload(req, res, next);
     });
 
+    // SETS CLOUD COOKIES WHEN NEEDED (NOT OFTEN, WEEKLY OR SO)
     router.post('/setCloudCookies', (req, res, next) => {
         return setCloudCookies(req, res, next);
     })
 
-    // Gets chat logs
-
-    // Reminder, pending doesnt mean not friend request, it means the other user has not responded to the chat thus confirming it.
-    // Users can chat together and have a chat on their confirmed list but that doesnt mean they are friends.
-    // Pending chats can be treated differently on the front end. (can be hidden, shown last, deleted, etc).
-
+    // GET USER CONVERSATION LOGS
     router.post('/getconversationlogs', (req, res, next) => {
         return getconversationlogs(req, res, next);
     });
 
-    // Sends chat message to a chat document.
-    // If friends, chat doesnt exist, then create chat, make chat confirmed for both
-    // If friends, chat exists, forward chat message to chat document
-    // If not friends, chat doesnt exist, then create chat make chat pending for other user
-    // If not friends, chat exists, forward chat message to chat document, if chat in pending array take chat off pending, put into confirmed.
+    // BEGIN CHAT USING MONGO IF REDIS NOT WORKING
     router.post('/beginchat', (req, res, next) => {
         return beginchat(req, res, next);
     });
 
+    // PUBLISH VIDEO WITH THUMBNAIL UPLOAD
     router.post('/publishvideo', uploadCheck.single('image'), (req, res, next) => {
         return publishVideo(req, res, next);
     });
 
+    // PUBLISH SINGLE ARTICLE TO MONGO AND NEO4J
     router.post('/publisharticle', (req, res, next) => {
         return publishArticle(req, res, next);
     })
 
+    // GETS CLOUDFRONT URL FOR SINGLE VIDEO
     router.post('/fetchCloudfrontUrl', (req, res, next) => {
         return fetchCloudfrontUrl(req, res, next);
     });
 
+    // GETS PAGE DATA FOR SINGLE VIDEO PAGE
     router.post('/fetchvideopagedata', (req, res, next) => {
         return fetchVideoPageData(req, res, next);
     });
 
+    // GETS PAGE DATA FOR SINGLE ARTICLE PAGE
     router.post('/fetcharticlepagedata', (req, res, next) => {
         return fetchArticlePageData(req, res, next);
     })
+
+    // INCREMENT VIDEO VIEW BY 1
     router.post('/incrementview', (req, res, next) => {
         return incrementView(req, res, next);
     });
 
+
+    router.post('/likedislike', (req, res, next) => {
+        return likeDislike(req, res, next);
+    });
+
     // GET a users profile
 
-    // GET a video
     return router;
 }
 

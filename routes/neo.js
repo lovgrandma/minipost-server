@@ -61,11 +61,11 @@ This is a fallback method incase recommendation system cannot find enough unique
 const serveRandomTrendingVideos = async (user = "") => {
     const session = driver.session();
     // Do not be confused by following returning 5 videos on client side. The first match will be doubled and removed when Video-RESPONSE-article query is matched
+    // Avoid using skip as this may skip over documents that hold article responses
     let skip = Math.floor(Math.random() * 5);
-    let query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC SKIP $skip LIMIT 100";
-    console.log(skip);
-    let params = { skip: neo4j.int(skip) };
-    let getHighestTrending = await session.run(query, params)
+    let query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC LIMIT 100";
+    //let params = { skip: neo4j.int(skip) };
+    let getHighestTrending = await session.run(query)
         .then(async (result) => {
             if (result) {
                 let graphRecords = result.records;
@@ -701,7 +701,8 @@ const fetchSingleArticleData = async (id) => {
         })
     return data;
 }
-/** Experimental high frequency increment video views on redis database. Returns boolean */
+/** Experimental high frequency increment video views on redis database. Returns boolean
+Accurate and reliable incrementation is maintained in redis, record values are simply copied to neo4j */
 const incrementVideoView = async (mpd) => {
     let videoExists = await checkVideoExists(mpd);
     if (videoExists) {
