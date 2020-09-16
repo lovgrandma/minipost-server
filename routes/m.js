@@ -1194,12 +1194,12 @@ module.exports = function(io) {
 
     // Fetches page data for single video page
     const fetchVideoPageData = async (req, res, next) => {
-        return res.json(await neo.fetchSingleVideoData(req.body.rawMpd));
+        return res.json(await neo.fetchSingleVideoData(req.body.rawMpd, req.body.user ));
     }
 
     // Fetches page data for single article page
     const fetchArticlePageData = async (req, res, next) => {
-        res.json(await neo.fetchSingleArticleData(req.body.id));
+        res.json(await neo.fetchSingleArticleData(req.body.id, req.body.user ));
     }
 
     const getfriends = async (req, res, next) => {

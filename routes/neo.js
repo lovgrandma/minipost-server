@@ -34,8 +34,13 @@ const serveVideoRecommendations = async (user = "", append = []) => {
                 return true;
             })
             .then( async (result) => {
+                let originalLength = append.length;
                 if (append.length > 0) {
-                    return await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
+                    append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
+                    if (append.length > 0) {
+                        append = append.slice(originalLength, append.length);
+                    }
+                    return append;
                 }
                 return await serveRandomTrendingVideos(user);
             });
@@ -523,7 +528,7 @@ const resolveEmptyData = (record, type, dataType = "string") => {
     return "";
 }
 
-const fetchSingleVideoData = async (mpd) => {
+const fetchSingleVideoData = async (mpd, user) => {
     let session = driver.session();
     // Must query for original video and potential relational matches to articles. Not either/or or else query will not function properly
     let query = "match (a:Video {mpd: $mpd}) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c";
@@ -564,9 +569,21 @@ const fetchSingleVideoData = async (mpd) => {
                             video.description = resolveEmptyData(result.records[0], "description"); // Unrequired data member
                             video.tags = resolveEmptyData(result.records[0], "tags", "array"); // Unrequired data member
                             video.published = result.records[0]._fields[0].properties.publishDate;
-                            video.likes = result.records[0]._fields[0].properties.likes.toNumber();
-                            video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
-                            video.views = result.records[0]._fields[0].properties.views.toNumber();
+                            if (result.records[0]._fields[0].properties.likes.toNumber) {
+                                video.likes = result.records[0]._fields[0].properties.likes.toNumber();
+                            } else {
+                                video.likes = result.records[0]._fields[0].properties.likes;
+                            }
+                            if (video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber) {
+                                video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
+                            } else {
+                                video.dislikes = result.records[0]._fields[0].properties.dislikes;
+                            }
+                            if (video.views = result.records[0]._fields[0].properties.views.toNumber) {
+                                video.views = result.records[0]._fields[0].properties.views.toNumber();
+                            } else {
+                                video.views = result.records[0]._fields[0].properties.views;
+                            }
                             video.mpd = result.records[0]._fields[0].properties.mpd;
                             video.thumbnail = resolveEmptyData(result.records[0], "thumbnailUrl");
                             // Append article and video responses of this video to articleResponses data member
@@ -614,13 +631,14 @@ const fetchSingleVideoData = async (mpd) => {
             return video;
         })
         .then(async (result) => {
+            result.likedDisliked = await getUserLikedDisliked(mpd, "video", user);
             result.mpd = await cloudfrontconfig.serveCloudfrontUrl(mpd);
             return result;
         })
     return data;
 };
 
-const fetchSingleArticleData = async (id) => {
+const fetchSingleArticleData = async (id, user) => {
     let session = driver.session();
     let query = "match (a:Article {id: $id}) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c";
     let params = {id};
@@ -631,6 +649,7 @@ const fetchSingleArticleData = async (id) => {
         videoResponses: [],
         responseTo: []
     }
+    data.likedDisliked = await getUserLikedDisliked(id, "article", user);
     data.article = await session.run(query, params)
         .then(async (result) => {
             session.close();
@@ -701,6 +720,44 @@ const fetchSingleArticleData = async (id) => {
             return article;
         })
     return data;
+}
+
+// Returns whether or not user liked or disliked a piece of content
+const getUserLikedDisliked = async (id, type, user) => {
+    try {
+        let session = driver.session();
+        let query = "optional match ( a:Person { name: $user })-[r:LIKES]->";
+        let params = { user: user }
+        if (type.normalize().toLocaleLowerCase() == "article") {
+            query += "( b:Article { id: $id }) return r union optional match ( a:Person {name: $user })-[r:DISLIKES]->( b:Article {id: $id }) return r";
+        } else {
+            query += "( b:Video { mpd: $id }) return r union optional match ( a:Person { name: $user })-[r:DISLIKES]->( b:Video { mpd: $id }) return r";
+        }
+        params.id = id;
+        return await session.run(query, params)
+            .then((result) => {
+                session.close();
+                for (const record of result.records) {
+                    if (record._fields) {
+                        if (record._fields[0]) {
+                            if (record._fields[0].type) {
+                                if (record._fields[0].type == "LIKES") {
+                                    return "likes";
+                                } else if (record._fields[0].type == "DISLIKES") {
+                                    return "dislikes";
+                                }
+                            }
+                        }
+                    }
+                };
+            })
+            .catch((err) => {
+                return false;
+            })
+    } catch (err) {
+        return false;
+    }
+
 }
 
 /** Experimental high frequency increment video views on redis database. Returns boolean
@@ -778,6 +835,19 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
                 rediscontentclient.select(db, async function(err, res) { // Select article db
                     if (res == "OK") {
                         rediscontentclient.hgetall(id, (err, value) => {
+                            console.log(value);
+                            if (value) {
+                                if (value.likes) {
+                                    if (value.likes < 0) {
+                                        rediscontentclient.hmset(id, "likes", 0);
+                                    }
+                                }
+                                if (value.dislikes) {
+                                    if (value.dislikes < 0) {
+                                        rediscontentclient.hmset(id, "dislikes", 0);
+                                    }
+                                }
+                            }
                             if (err) {
                                 return reject("failed, do not update");
                             }
@@ -789,7 +859,7 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
                     }
                 });
             })
-            if (!redisAccesible) {
+            if (!redisAccesible) { // if redis db fails for some reason, simply exit cleanly
                 return false;
             }
             // rediscontentclient.hgetall(id, (err, value) =>  will return created media of type
@@ -810,6 +880,7 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
                                 }
                                 rediscontentclient.hgetall(id, (err, value) => {
                                     if (err) {
+                                        console.log(err);
                                         return resolve(false);
                                     }
                                     return resolve(value);
@@ -950,7 +1021,6 @@ const correctQueryForLikeDislike = (query, like, type) => {
 
 const incrementLike = async (like, increment, id, type, user) => {
     try {
-        console.log(like, increment, id, type, user);
         type = type.charAt(0).toUpperCase() + type.slice(1);
         let cleanUp = false;
         // Check user relationships
@@ -962,12 +1032,11 @@ const incrementLike = async (like, increment, id, type, user) => {
             let success = await session.run(query, params)
                 .then( async (result) => {
                     session.close();
-                    console.log(result.summary.query);
                     let session2 = driver.session(); // Update user relationships
-                    if (result.records.length == 0 && increment) { // If user has not done intended action already and wants to
+                    if (result.records.length == 0 && increment) { // If user has not done intended action already and wants to increment
                         query = "match ( a:Person { name: $user }), ( b:Video { mpd: $id }) merge (a)-[r:LIKES]->(b) return a, r, b";
                         query = correctQueryForLikeDislike(query, like, type);
-                    } else if (result.records.length > 0 && !increment) {
+                    } else if (result.records.length > 0 && !increment) { // if user has done action already and wants to decrement
                         query = "match ( a:Person { name: $user })-[r:LIKES]->( b:Video { mpd: $id }) delete r return a, r, b";
                         query = correctQueryForLikeDislike(query, like, type);
                     } else {
@@ -989,28 +1058,26 @@ const incrementLike = async (like, increment, id, type, user) => {
                             session2.close();
                             if (increment && updateRel.records.length > 0) { // Only clean up like/dislike if user is incrementing (useless query if user decrements)
                                 let removeRel = await cleanUpLikeDislikeRel(user, like, type, id);
-                                if (removeRel) {
-                                    return true;
-                                }
-                                return false;
+                                return true;
                             }
                             return true;
                         }
                     }
                     return false;
                 })
-                .then(async () => {
-                    // update video incrementation in redis
-                    let redisRecordValues = await incrementLikeDislikeRedis(type, id, increment, like, user, cleanUp);
-                    if (!redisRecordValues) {
-                        return false;
-                    } else {
-                        console.log(redisRecordValues);
-                        // update neo4j here
-                        return true;
+                .then( async (result) => {
+                    if (result) {
+                        // update video incrementation in redis
+                        let redisRecordValues = await incrementLikeDislikeRedis(type, id, increment, like, user, cleanUp);
+                        if (!redisRecordValues) {
+                            return false;
+                        } else {
+                            return setContentData(redisRecordValues, type, id); //update neo4j
+                        }
                     }
+                    return false;
                 })
-            console.log(success);
+            return success;
         }
         return true;
     } catch (err) {
@@ -1018,6 +1085,38 @@ const incrementLike = async (like, increment, id, type, user) => {
         return false;
     }
     return false;
+}
+
+const setContentData = async (values, type, id) => {
+    try {
+        let viewsOrReads = "views";
+        console.log(values);
+        if (values.likes) {
+            let session = driver.session();
+            let query = "match (a:Video {mpd: $id}) set a.likes = $likes, a.dislikes = $dislikes";
+            let params = { likes: neo4j.int(values.likes), dislikes: neo4j.int(values.dislikes), id: id };
+            if (values.views) {
+                query += ", a.views = $views";
+                params.views = neo4j.int(values.views);
+            }
+            query += " return a";
+            if (type.normalize().toLocaleLowerCase() == "article") {
+                viewsOrReads = "reads";
+                query = "match (a:Article {id: $id}) set a.likes = $likes, a.dislikes = $dislikes";
+                if (values.reads) {
+                    query += ", a.reads = $reads";
+                    params.reads = neo4j.int(values.reads);
+                }
+                query += " return a";
+            }
+            return await session.run(query, params)
+                .then((result) => {
+                    return true;
+                })
+        }
+    } catch (err) {
+        return false;
+    }
 }
 
 module.exports = { checkFriends: checkFriends,

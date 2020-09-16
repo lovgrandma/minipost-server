@@ -28,6 +28,7 @@ app.use(bodyParser.json({
             return req.get('content-type').indexOf('multipart/form-data') !== 0;
         }
     },
+    limit: "50mb" // Set higher body parser limit for size of video objects
 }));
 app.use(bodyParser.urlencoded({ extended: false }));
 // parse cookies
