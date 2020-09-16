@@ -1,3 +1,5 @@
+const fs = require('fs');
+
 /** Utility file utility.js
 @version 0.1
 @author Jesse Thompson, @ninjagecko @
@@ -94,6 +96,40 @@ get = function(obj, key) {
     }
 }
 
+/* Deletes one file cleanly */
+deleteOne = async (filePath) => {
+    try {
+        if (filePath) {
+            if (typeof filePath === 'string') {
+                fs.unlink(filePath, (err) => {
+                    if (err) {
+                        return false;
+                        throw err;
+                    } else {
+                        console.log(filePath + " deleted");
+                        return true;
+                    }
+                });
+            }
+        }
+        return false;
+    } catch (err) {
+        // File did not delete or was already deleted
+        return false;
+    }
+}
+
+// Returns opposite value, useful for setting remove dislike if user is liking and vice versa
+// User liked a video? Make sure dislikes are removed from neo4j db
+const opposite = function(value) {
+    if (value) {
+        return false;
+    }
+    return true;
+}
+
 module.exports = { deepEquals: deepEquals,
                  shuffleArray: shuffleArray,
-                 get: get };
+                 get: get,
+                 deleteOne: deleteOne,
+                 opposite: opposite };

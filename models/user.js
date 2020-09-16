@@ -54,14 +54,6 @@ const UserSchema = new mongoose.Schema({
     articles: {
         type: Array,
         required: true
-    },
-    likes: {
-        type: Array,
-        required: true
-    },
-    dislikes: {
-        type: Array,
-        required: true
     }
 });
 

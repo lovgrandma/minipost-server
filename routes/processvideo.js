@@ -406,25 +406,6 @@ const deleteJob = async (complete, job, mpd, room) => {
     }, 500);
 }
 
-/* Deletes one file cleanly */
-const deleteOne = async (filePath) => {
-    try {
-        if (filePath) {
-            if (typeof filePath === 'string') {
-                fs.unlink(filePath, (err) => {
-                    if (err) {
-                        throw err;
-                    } else {
-                        console.log(filePath + " deleted");
-                    }
-                });
-            }
-        }
-    } catch (err) {
-        // File did not delete or was already deleted
-    }
-}
-
 exports.convertVideos = convertVideos;
 exports.deleteOne = deleteOne;
 exports.createObj = createObj;

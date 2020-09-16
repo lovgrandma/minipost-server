@@ -8,7 +8,7 @@ const redisapp = require('../redis');
 const bluebird = require('bluebird'); // Allows promisfying of redis calls, important for simplified returning key-values for redis calls
 bluebird.promisifyAll(redis);
 const redisclient = redisapp.redisclient;
-const redisvideoclient = redisapp.redisvideoclient;
+const rediscontentclient = redisapp.rediscontentclient;
 
 const util = require('util');
 const path = require('path');
@@ -249,16 +249,17 @@ const checkUserExists = async (user) => {
     return false;
 }
 
-const checkVideoExists = async (mpd) => {
-    if (mpd && typeof mpd === 'string') {
-        if (mpd.length > 0) {
+const checkNodeExists = async (id, type = "video") => {
+    if (id && typeof id === 'string') {
+        if (id.length > 0) {
             let session = driver.session();
-            let query = "match (a:Video {mpd: $mpd}) return a";
-            const videoFound = await session.run(query, {mpd: mpd })
+            let query = "match ( a:Video {mpd: $id}) return a";
+            query = videoOrArticle(type, query);
+            const videoFound = await session.run(query, {id: id })
                 .then(async (result) => {
                     session.close();
                     if (result.records) {
-                        if (result.records.length > 0) { // If one user was found matching said username
+                        if (result.records.length > 0) { // If one video was found matching said username
                             return true;
                         } else {
                             return false;
@@ -315,7 +316,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
             }
         })
         .then(async (result) => {
-            return await checkVideoExists(mpd);
+            return await checkNodeExists(mpd);
         })
         .then(async (result) => {
             session = driver.session();
@@ -701,31 +702,149 @@ const fetchSingleArticleData = async (id) => {
         })
     return data;
 }
+
 /** Experimental high frequency increment video views on redis database. Returns boolean
 Accurate and reliable incrementation is maintained in redis, record values are simply copied to neo4j */
 const incrementVideoView = async (mpd) => {
-    let videoExists = await checkVideoExists(mpd);
-    if (videoExists) {
-        let videoExistsRedis = redisvideoclient.hgetall(mpd);
-        if (videoExistsRedis) {
-            redisvideoclient.hincrby(mpd, "views", 1);
-            return await redisvideoclient.hgetall(mpd, (err, value) => {
-                setVideoViewsNeo(mpd, value.views);
-                return true;
-            })
-        } else {
-            redisvideoclient.hmset(mpd, "views", 1, "likes", 0, "views", 0);
-            return await redisvideoclient.hgetall(mpd, (err, value) => {
-                setVideoViewsNeo(mpd, value.views);
-                return true;
-            })
+    try {
+        let redisAccessible = true;
+        let videoExists = await checkNodeExists(mpd);
+        if (videoExists) {
+            let videoExistsRedis = await rediscontentclient.select(1, async function(err, res) {
+                if (res == "OK") {
+                    return await rediscontentclient.hgetall(mpd, (err, value) => {
+                        if (!err) {
+                            return value;
+                        }
+                        return "failed, do not update";
+                    });
+                } else {
+                    redisAccessible = false;
+                }
+                return false;
+            });
+            if (!redisAccessible) {
+                return false;
+            }
+            return await rediscontentclient.select(1, async function(err, res) {
+                if (videoExistsRedis == "failed, do not update") {
+                    return false;
+                } else if (videoExistsRedis) {
+                    rediscontentclient.hincrby(mpd, "views", 1);
+                    return await rediscontentclient.hgetall(mpd, (err, value) => {
+                        setVideoViewsNeo(mpd, value.views);
+                        return true;
+                    })
+                } else {
+                    rediscontentclient.hmset(mpd, "views", 1, "likes", 0, "dislikes", 0);
+                    return await rediscontentclient.hgetall(mpd, (err, value) => {
+                        setVideoViewsNeo(mpd, value.views);
+                        return true;
+                    })
+                }
+            });
         }
-    } else {
+    } catch (err) {
+        return false;
+    }
+    return false;
+}
+
+const reverseLikeOrDislike = (like) => {
+    if (like) {
+        return "dislikes";
+    }
+    return "likes";
+}
+
+const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanUp) => {
+    try {
+        let redisAccesible = true;
+        let nodeExists;
+        let db = 1;
+        let viewsOrReads = "views";
+        let likeOrDislike = "likes";
+        if (!like) {
+            likeOrDislike = "dislikes";
+        }
+        nodeExists = await checkNodeExists(id, type.normalize().toLocaleLowerCase());
+        if (type.normalize().toLocaleLowerCase() == "article") {
+            db = 2;
+            viewsOrReads = "reads";
+        }
+        if (nodeExists) {
+            // Check if node exists in redis database
+            let nodeExistsRedis = new Promise((resolve, reject) => {
+                rediscontentclient.select(db, async function(err, res) { // Select article db
+                    if (res == "OK") {
+                        rediscontentclient.hgetall(id, (err, value) => {
+                            if (err) {
+                                return reject("failed, do not update");
+                            }
+                            return resolve(value);
+                        });
+                    } else {
+                        redisAccesible = false;
+                        return reject(false);
+                    }
+                });
+            })
+            if (!redisAccesible) {
+                return false;
+            }
+            // rediscontentclient.hgetall(id, (err, value) =>  will return created media of type
+            return new Promise((resolve, reject) => {
+                rediscontentclient.select(db, async function(err, res) {
+                    nodeExistsRedis
+                        .then( async (result) => {
+                            if (result == "failed, do not update") {
+                                return resolve(false);
+                            } else if (result) {
+                                if (increment) {
+                                    rediscontentclient.hincrby(id, likeOrDislike, 1);
+                                    if (cleanUp) {
+                                        rediscontentclient.hincrby(id, reverseLikeOrDislike(like), -1);
+                                    }
+                                } else {
+                                    rediscontentclient.hincrby(id, likeOrDislike, -1);
+                                }
+                                rediscontentclient.hgetall(id, (err, value) => {
+                                    if (err) {
+                                        return resolve(false);
+                                    }
+                                    return resolve(value);
+                                });
+                            } else {
+                                if (increment) {
+                                    if (like) {
+                                        rediscontentclient.hmset(id, viewsOrReads, 1, "likes", 1, "dislikes", 0);
+                                    } else {
+                                        rediscontentclient.hmset(id, viewsOrReads, 1, "likes", 0, "dislikes", 1);
+                                    }
+                                }
+                                rediscontentclient.hgetall(id, (err, value) => {
+                                    if (err) {
+                                        return resolve(false);
+                                    }
+                                    return resolve(value);
+                                });
+                            }
+                        })
+                        .catch((err) => {
+                            if (err) {
+                                return resolve(false);
+                            }
+                            return resolve(true);
+                        })
+                });
+            });
+        }
+    } catch (err) {
         return false;
     }
 }
 
-/** Sets video views by passed value. Is not incremental which may cause issues. Inconsequential if fails or not working well, can replace with method that
+/** Sets video views by passed value. Is not incremental which can cause inaccuracy on neo4j. Inconsequential if fails or not working well, can replace with method that
 updates all neo4j video records on schedule. Views are reliably incremented with redis */
 const setVideoViewsNeo = async (mpd, value) => {
     try {
@@ -788,6 +907,119 @@ const removeDuplicates = async (media, type = "video") => {
     return media;
 }
 
+const videoOrArticle = (type, query) => {
+    if (type.normalize().toLocaleLowerCase() === "article") {
+        query = query.replace(":Video", ":Article");
+        query = query.replace("mpd:", "id:");
+    }
+    return query;
+}
+
+// Remove relationship of other type for when other type increments successfully
+const cleanUpLikeDislikeRel = async (user, like, type, id) => {
+    try {
+        let session = driver.session();
+        let query = "match ( a:Person {name: $user })-[r:LIKES]->( b:Video {mpd: $id }) delete r return a, r, b"; // Default to remove like from neo4j db
+        if (like) {
+            query = query.replace("r:LIKES", "r:DISLIKES");
+        }
+        query = videoOrArticle(type, query);
+        let params = { user: user, id: id };
+        let relationship = await session.run(query, params);
+        if (relationship) {
+            session.close();
+            if (relationship.records.length == 0) {
+                return true;
+            }
+        }
+        return false;
+    } catch (err) {
+        return false;
+    }
+    return false;
+}
+
+// Adds correct query params for relationships before query is ran to increment or decrement likes/dislikes
+const correctQueryForLikeDislike = (query, like, type) => {
+    if (!like) {
+            query = query.replace("r:LIKES", "r:DISLIKES");
+    }
+    query = videoOrArticle(type, query);
+    return query;
+}
+
+const incrementLike = async (like, increment, id, type, user) => {
+    try {
+        console.log(like, increment, id, type, user);
+        type = type.charAt(0).toUpperCase() + type.slice(1);
+        let cleanUp = false;
+        // Check user relationships
+        let session = driver.session();
+        let query = "match ( a:Person { name: $user })-[r:LIKES]->( b:Video { mpd: $id }) return a";
+        query = correctQueryForLikeDislike(query, like, type);
+        let params = { user: user, id: id };
+        if (await checkNodeExists(id, type.normalize().toLocaleLowerCase())) {
+            let success = await session.run(query, params)
+                .then( async (result) => {
+                    session.close();
+                    console.log(result.summary.query);
+                    let session2 = driver.session(); // Update user relationships
+                    if (result.records.length == 0 && increment) { // If user has not done intended action already and wants to
+                        query = "match ( a:Person { name: $user }), ( b:Video { mpd: $id }) merge (a)-[r:LIKES]->(b) return a, r, b";
+                        query = correctQueryForLikeDislike(query, like, type);
+                    } else if (result.records.length > 0 && !increment) {
+                        query = "match ( a:Person { name: $user })-[r:LIKES]->( b:Video { mpd: $id }) delete r return a, r, b";
+                        query = correctQueryForLikeDislike(query, like, type);
+                    } else {
+                        return false;
+                    }
+                    let session3 = driver.session();
+                    let query2 = "match ( a:Person {name: $user})-[r:LIKES]-( b:Video { mpd: $id }) return a, b, r";
+                    if (like) {
+                        query2 = query2.replace("r:LIKES", "r:DISLIKES");
+                    }
+                    query2 = videoOrArticle(type, query2);
+                    let otherLikeDislikeExisting = await session3.run(query2, params);
+                    if (otherLikeDislikeExisting.records.length > 0) {
+                        cleanUp = true;
+                    }
+                    if (otherLikeDislikeExisting) {
+                        let updateRel = await session2.run(query, params);
+                        if (updateRel) {
+                            session2.close();
+                            if (increment && updateRel.records.length > 0) { // Only clean up like/dislike if user is incrementing (useless query if user decrements)
+                                let removeRel = await cleanUpLikeDislikeRel(user, like, type, id);
+                                if (removeRel) {
+                                    return true;
+                                }
+                                return false;
+                            }
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+                .then(async () => {
+                    // update video incrementation in redis
+                    let redisRecordValues = await incrementLikeDislikeRedis(type, id, increment, like, user, cleanUp);
+                    if (!redisRecordValues) {
+                        return false;
+                    } else {
+                        console.log(redisRecordValues);
+                        // update neo4j here
+                        return true;
+                    }
+                })
+            console.log(success);
+        }
+        return true;
+    } catch (err) {
+        console.log(err);
+        return false;
+    }
+    return false;
+}
+
 module.exports = { checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
                  createOneVideo: createOneVideo,
@@ -796,4 +1028,5 @@ module.exports = { checkFriends: checkFriends,
                  fetchSingleVideoData: fetchSingleVideoData,
                  fetchSingleArticleData: fetchSingleArticleData,
                  incrementVideoView: incrementVideoView,
-                 createOneUser: createOneUser };
+                 createOneUser: createOneUser,
+                 incrementLike: incrementLike };

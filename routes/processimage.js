@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const uuidv4 = require('uuid/v4');
+const { deleteOne } = require('./utility');
 // file upload
 const aws = require('aws-sdk');
 const s3Cred = require('./api/s3credentials.js');
@@ -14,7 +15,6 @@ const processThumb = async (thumbFile) => {
     let checkExistingObject = null;
     let generatedUuid = null;
     let uploadData;
-    console.log(thumbFile);
     do {
         generatedUuid = uuidv4().split("-").join("");
         try {
@@ -31,7 +31,10 @@ const processThumb = async (thumbFile) => {
         let data = fs.createReadStream(thumbFile);
         uploadData = await s3.upload({ Bucket: 'minifs-thumbnails', Key: generatedUuid + ".jpeg", Body: data }).promise();
         if (uploadData) {
-            return generatedUuid;
+            setTimeout(() => {
+                deleteOne(thumbFile); // Delete temporary image file stored after thumbnail has been loaded to AWS
+                return generatedUuid;
+            }, 1500);
         }
     }
     return false;

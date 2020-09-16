@@ -279,7 +279,7 @@ module.exports = function(io) {
     /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db, also merges relationship in neo4j (author)-[PUBLISHED]->(video) */
     const publishVideo = async (req, res, next) => {
         let image = path.parse(req.file.filename);
-        let thumbnailUrl = './temp/' + image.name + "." + req.body.extension;
+        let thumbnailUrl = 'temp/' + image.name + "." + req.body.extension;
         try {
             if (req.body.title && req.body.user && req.body.mpd) {
                 if (req.body.title.length > 0 && req.body.mpd.length > 0) {
@@ -582,12 +582,6 @@ module.exports = function(io) {
 
                         ]
                     }
-                ],
-                likes: [
-
-                ],
-                dislikes: [
-
                 ]
             };
 
@@ -1456,8 +1450,17 @@ module.exports = function(io) {
     }
 
     const likeDislike = async (req, res, next) => {
-        console.log(req.body);
-        return res.json(true);
+        try {
+            if (req.body) {
+                let result = await neo.incrementLike(req.body.like, req.body.increment, req.body.id, req.body.type, req.body.user);
+                if (result) {
+                    return res.json(true);
+                }
+            }
+        } catch (err) {
+            return res.json(false);
+        }
+        return res.json(false);
     }
 
     // LOGIN USING CREDENTIALS
