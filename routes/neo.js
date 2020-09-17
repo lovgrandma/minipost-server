@@ -760,9 +760,23 @@ const getUserLikedDisliked = async (id, type, user) => {
 
 }
 
+// Will check for optional already existing WATCHED relationship and delete, then merge new WATCHED relationship with milliseconds since epoch (january 1, 1970)
+const setWatchedRelationship = async (mpd, user) => {
+    try {
+        const d = new Date().getTime();
+        let session = driver.session();
+        let query = "match ( a:Person { name: $user }), ( b:Video { mpd: $mpd }) optional match (a)-[r:WATCHED]->(b) delete r merge (a)-[r2:WATCHED { time: $ms }]->(b) return a, r2, b";
+        let params = { user: user, ms: d, mpd: mpd };
+        return await session.run(query, params)
+    } catch (err) {
+        return err;
+    }
+    return false;
+}
+
 /** Experimental high frequency increment video views on redis database. Returns boolean
 Accurate and reliable incrementation is maintained in redis, record values are simply copied to neo4j */
-const incrementVideoView = async (mpd) => {
+const incrementVideoView = async (mpd, user) => {
     try {
         let redisAccessible = true;
         let videoExists = await checkNodeExists(mpd);
@@ -784,21 +798,24 @@ const incrementVideoView = async (mpd) => {
                 return false;
             }
             return await rediscontentclient.select(1, async function(err, res) {
-                if (videoExistsRedis == "failed, do not update") {
-                    return false;
-                } else if (videoExistsRedis) {
-                    rediscontentclient.hincrby(mpd, "views", 1);
-                    return await rediscontentclient.hgetall(mpd, (err, value) => {
-                        setVideoViewsNeo(mpd, value.views);
-                        return true;
+                return await setWatchedRelationship(mpd, user)
+                    .then( async (result) => {
+                        if (videoExistsRedis == "failed, do not update") {
+                            return false;
+                        } else if (videoExistsRedis) {
+                            rediscontentclient.hincrby(mpd, "views", 1);
+                            return await rediscontentclient.hgetall(mpd, (err, value) => {
+                                setVideoViewsNeo(mpd, value.views);
+                                return true;
+                            })
+                        } else {
+                            rediscontentclient.hmset(mpd, "views", 1, "likes", 0, "dislikes", 0);
+                            return await rediscontentclient.hgetall(mpd, (err, value) => {
+                                setVideoViewsNeo(mpd, value.views);
+                                return true;
+                            })
+                        }
                     })
-                } else {
-                    rediscontentclient.hmset(mpd, "views", 1, "likes", 0, "dislikes", 0);
-                    return await rediscontentclient.hgetall(mpd, (err, value) => {
-                        setVideoViewsNeo(mpd, value.views);
-                        return true;
-                    })
-                }
             });
         }
     } catch (err) {
@@ -807,6 +824,7 @@ const incrementVideoView = async (mpd) => {
     return false;
 }
 
+// Used critically to remove like of opposite type. If user has liked but dislike was incremented, like must be decremented. Returns appropriate value for redis record update
 const reverseLikeOrDislike = (like) => {
     if (like) {
         return "dislikes";
@@ -880,7 +898,6 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
                                 }
                                 rediscontentclient.hgetall(id, (err, value) => {
                                     if (err) {
-                                        console.log(err);
                                         return resolve(false);
                                     }
                                     return resolve(value);
