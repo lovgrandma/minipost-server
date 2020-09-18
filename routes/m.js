@@ -1460,7 +1460,15 @@ module.exports = function(io) {
         } catch (err) {
             return res.json(false);
         }
-        return res.json(false);
+    }
+
+    const fetchProfilePageData = async (req, res, next) => {
+        try {
+            console.log(await neo.fetchProfilePageData(req.body.user));
+            return res.json(await neo.fetchProfilePageData(req.body.user));
+        } catch (err) {
+            return res.json(false);
+        }
     }
 
     // LOGIN USING CREDENTIALS
@@ -1572,6 +1580,10 @@ module.exports = function(io) {
     router.post('/likedislike', (req, res, next) => {
         return likeDislike(req, res, next);
     });
+
+    router.post('/fetchprofilepagedata', (req, res, next) => {
+        return fetchProfilePageData(req, res, next);
+    })
 
     // GET a users profile
 

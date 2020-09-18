@@ -1136,6 +1136,68 @@ const setContentData = async (values, type, id) => {
     }
 }
 
+const fetchProfilePageData = async (user) => {
+    try {
+        if (user) {
+            if (user.length > 0) {
+                let session = driver.session();
+                let query = "match (a:Person { name: $user }) optional match (a)-[r:PUBLISHED]-(b) return a, b";
+                let params = { user: user };
+                return await session.run(query, params)
+                    .then((result) => {
+                        let data = {
+                            user: {},
+                            content: []
+                        }
+                        let userObject = {
+                            username: "",
+                            id: ""
+                        }
+                        if (result.records) {
+                            if (result.records.length > 0) {
+                                if (result.records[0]._fields) {
+                                    if (result.records[0]._fields[0]) {
+                                        if (result.records[0]._fields[0].properties) {
+                                            userObject.username = result.records[0]._fields[0].properties.name;
+                                            userObject.id = result.records[0]._fields[0].properties.id;
+                                        }
+                                    }
+                                }
+                                data.user = userObject;
+                                for (const record of result.records) {
+                                    if (record._fields) {
+                                        if (record._fields[1]) {
+                                            if (record._fields[1].labels) {
+                                                if (record._fields[1].labels[0]) {
+                                                    record._fields[1].labels.forEach((label) => {
+                                                        if (record._fields[1].properties) {
+                                                            if (label == "Article") {
+                                                                data.content.push(record._fields[1].properties)
+                                                            } else if (label == "Video") {
+                                                                data.content.push(record._fields[1].properties)
+                                                            }
+                                                        }
+                                                    })
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                return data;
+                            }
+                        }
+                        return false;
+                    })
+                    .catch((err) => {
+                        console.log(err);
+                    })
+            }
+        }
+    } catch (err) {
+        return false;
+    }
+}
+
 module.exports = { checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
                  createOneVideo: createOneVideo,
@@ -1145,4 +1207,5 @@ module.exports = { checkFriends: checkFriends,
                  fetchSingleArticleData: fetchSingleArticleData,
                  incrementVideoView: incrementVideoView,
                  createOneUser: createOneUser,
-                 incrementLike: incrementLike };
+                 incrementLike: incrementLike,
+                 fetchProfilePageData: fetchProfilePageData };
