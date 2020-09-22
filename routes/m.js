@@ -670,9 +670,9 @@ module.exports = function(io) {
             if(req.body.limit) { // This determines if there is a body length limit, meaning a request to see more users. This only occurs if user has already made a base search which is done in the else statement.
                 User.find({username: new RegExp(req.body.searchusers) }, {username: 1, friends: 1} , function(err, result) {
                     if (!err) {
+                        // resultlength stores length of results when user made fetch request. Body limit shows how much results to return to user for "load more" functionality console.log either to see
                         let resultlength = result.length; // Save length before result array is spliced for accurate comparison later
                         searchresults.push(result.splice(0,req.body.limit)); // Splices result into only 0 to limit, leaving rest in result.
-                        console.log("resultlength: " + resultlength + " limit:" + req.body.limit);
                         if (resultlength > req.body.limit) {
                             searchresults.push({ moreusers: true }); // determines if there are more users to load if another request is made
                         } else {
@@ -792,7 +792,6 @@ module.exports = function(io) {
                                           {new: true},
                                           function(err, result) {
                         if (err) throw err;
-                        console.log(result)
                         if (!resEnd) {
                             res.json(result.friends[0].confirmed);
                             resEnd = true;
@@ -1157,7 +1156,7 @@ module.exports = function(io) {
                                 console.log("more than 4 hours since video began transcoding");
                                 // It has taken too long to convert the video, it can be deleted. This ensures users db video stack is reset and user is not being asked to fill in detail about a video that will never finish transcoding
                                 User.findOneAndUpdate({username: req.body.username}, {$pull: { "videos" : { id: video.id }}}, function(err, result) {
-                                    console.log(result);
+                                    // Video was removed from user's document on mongodb since it has been 4 hours since it began converting. Too long.
                                 }).lean();
                             } else {
                                 pendingVideo = true;
@@ -1464,7 +1463,6 @@ module.exports = function(io) {
 
     const fetchProfilePageData = async (req, res, next) => {
         try {
-            console.log(await neo.fetchProfilePageData(req.body.user));
             return res.json(await neo.fetchProfilePageData(req.body.user));
         } catch (err) {
             return res.json(false);

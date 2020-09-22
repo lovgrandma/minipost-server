@@ -1136,6 +1136,7 @@ const setContentData = async (values, type, id) => {
     }
 }
 
+// Fetches data for single profile page
 const fetchProfilePageData = async (user) => {
     try {
         if (user) {
@@ -1147,7 +1148,11 @@ const fetchProfilePageData = async (user) => {
                     .then((result) => {
                         let data = {
                             user: {},
-                            content: []
+                            content: [],
+                            totalviews: 0,
+                            totalreads: 0,
+                            totalvideos: 0,
+                            totalarticles: 0
                         }
                         let userObject = {
                             username: "",
@@ -1172,8 +1177,16 @@ const fetchProfilePageData = async (user) => {
                                                     record._fields[1].labels.forEach((label) => {
                                                         if (record._fields[1].properties) {
                                                             if (label == "Article") {
+                                                                data.totalarticles++;
+                                                                if (record._fields[1].properties.reads) {
+                                                                    data.totalreads += parseInt(record._fields[1].properties.reads);
+                                                                }
                                                                 data.content.push(record._fields[1].properties)
                                                             } else if (label == "Video") {
+                                                                data.totalvideos++;
+                                                                if (record._fields[1].properties.views) {
+                                                                    data.totalviews += parseInt(record._fields[1].properties.views);
+                                                                }
                                                                 data.content.push(record._fields[1].properties)
                                                             }
                                                         }
@@ -1189,7 +1202,7 @@ const fetchProfilePageData = async (user) => {
                         return false;
                     })
                     .catch((err) => {
-                        console.log(err);
+                        return false;
                     })
             }
         }

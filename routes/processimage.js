@@ -10,34 +10,47 @@ const multer = require('multer');
 aws.config.update(s3Cred.awsConfig);
 const s3 = new aws.S3();
 
+// Set timeout to delete one left over thumbfile
+async function doImgDeletion(thumbFile) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            resolve(deleteOne(thumbFile));
+        }, 1500);
+    });
+}
+
+// Generates a unique uuid for a thumbnail file and uploads said file to s3 if no existing object with same uuid (try 3 times) was found
+// Return uuid of thumbnail
 const processThumb = async (thumbFile) => {
-    let i = 0;
-    let checkExistingObject = null;
-    let generatedUuid = null;
-    let uploadData;
-    do {
-        generatedUuid = uuidv4().split("-").join("");
-        try {
-            checkExistingObject = await s3.getObject({ Bucket: "minifs-thumbnails", Key: generatedUuid + ".jpeg", Range: "bytes=0-9" }).promise();
-        } catch (err) { // No image was found with matching uuid, use current uuid to make thumbnail image
-            i = 3;
+    try {
+        let i = 0;
+        let checkExistingObject = null;
+        let generatedUuid = null;
+        let uploadData;
+        do {
+            generatedUuid = uuidv4().split("-").join("");
+            try {
+                checkExistingObject = await s3.getObject({ Bucket: "minifs-thumbnails", Key: generatedUuid + ".jpeg", Range: "bytes=0-9" }).promise();
+            } catch (err) { // No image was found with matching uuid, use current uuid to make thumbnail image
+                i = 3;
+            }
+            if (await checkExistingObject) {
+                generatedUuid = null;
+                i++;
+            }
+        } while (i < 3);
+        if (generatedUuid) {
+            let data = fs.createReadStream(thumbFile);
+            uploadData = await s3.upload({ Bucket: 'minifs-thumbnails', Key: generatedUuid + ".jpeg", Body: data }).promise();
+            if (uploadData) {
+                return doImgDeletion(thumbFile).then(() => {
+                    return generatedUuid;
+                })
+            }
         }
-        if (await checkExistingObject) {
-            generatedUuid = null;
-            i++;
-        }
-    } while (i < 3);
-    if (generatedUuid) {
-        let data = fs.createReadStream(thumbFile);
-        uploadData = await s3.upload({ Bucket: 'minifs-thumbnails', Key: generatedUuid + ".jpeg", Body: data }).promise();
-        if (uploadData) {
-            setTimeout(() => {
-                deleteOne(thumbFile); // Delete temporary image file stored after thumbnail has been loaded to AWS
-                return generatedUuid;
-            }, 1500);
-        }
+    } catch (err) {
+        return false;
     }
-    return false;
 }
 
 module.exports = { processThumb: processThumb };
