@@ -701,7 +701,9 @@ module.exports = function(io) {
                     // Follow query gets pending friends list from logged in user and pushes it into array to determine if a searched user has asked to be friends.
                     User.findOne({username: req.body.username }, {friends: 1}, function(err, result) {
                         if (err) throw err;
-                        searchresults.push(result.friends[1].pending)
+                        if (result) {
+                            searchresults.push(result.friends[1].pending)
+                        }
                         res.json(searchresults);
                         res.end();
                     }).lean();

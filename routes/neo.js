@@ -16,6 +16,7 @@ const neo4j = require('neo4j-driver');
 const driver = neo4j.driver("bolt://localhost:7687", neo4j.auth.basic("neo4j", "git2003hp7474%"));
 const uuidv4 = require('uuid/v4');
 const cloudfrontconfig = require('./servecloudfront');
+const s3Cred = require('./api/s3credentials.js');
 const utility = require('./utility');
 const User = require('../models/user');
 const Chat = require('../models/chat');
@@ -1098,7 +1099,6 @@ const incrementLike = async (like, increment, id, type, user) => {
         }
         return true;
     } catch (err) {
-        console.log(err);
         return false;
     }
     return false;
@@ -1152,7 +1152,8 @@ const fetchProfilePageData = async (user) => {
                             totalviews: 0,
                             totalreads: 0,
                             totalvideos: 0,
-                            totalarticles: 0
+                            totalarticles: 0,
+                            cloud: s3Cred.cdn.cloudFront1
                         }
                         let userObject = {
                             username: "",
@@ -1179,16 +1180,19 @@ const fetchProfilePageData = async (user) => {
                                                             if (label == "Article") {
                                                                 data.totalarticles++;
                                                                 if (record._fields[1].properties.reads) {
+                                                                    record._fields[1].properties.reads = parseInt(record._fields[1].properties.reads);
                                                                     data.totalreads += parseInt(record._fields[1].properties.reads);
                                                                 }
-                                                                data.content.push(record._fields[1].properties)
                                                             } else if (label == "Video") {
                                                                 data.totalvideos++;
                                                                 if (record._fields[1].properties.views) {
+                                                                    record._fields[1].properties.views = parseInt(record._fields[1].properties.views);
                                                                     data.totalviews += parseInt(record._fields[1].properties.views);
                                                                 }
-                                                                data.content.push(record._fields[1].properties)
                                                             }
+                                                            record._fields[1].properties.likes = parseInt(record._fields[1].properties.likes);
+                                                            record._fields[1].properties.dislikes = parseInt(record._fields[1].properties.dislikes);
+                                                            data.content.push(record._fields[1].properties);
                                                         }
                                                     })
                                                 }

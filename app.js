@@ -13,6 +13,7 @@ const busboyBodyParser = require('busboy-body-parser');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const morgan = require('morgan');
+const assert = require('assert');
 const redis = require('./redis');
 const app = express();
 
