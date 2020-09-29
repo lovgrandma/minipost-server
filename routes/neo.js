@@ -443,7 +443,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
 }
 
 /* Creates one article node on neo4j and merges user ((author)-[r:PUBLISHED]->(article)) to article neo4j node */
-const createOneArticle = async (article) => {
+const createOneArticle = async (article, edit = false) => {
     try {
         if (article._id && article.author && article.title && article.body) {
             if (article._id.length > 0 && article.author.length > 0 && article.title.length > 0 && article.body.length > 0) {
@@ -452,7 +452,7 @@ const createOneArticle = async (article) => {
                 let query = "match (a:Article { id: $id }) return a";
                 let params = { id: article._id };
                 let nodeExists = await session.run(query, params);
-                if (!nodeExists || nodeExists.records.length == 0) {
+                if (!nodeExists || nodeExists.records.length == 0 && !edit) {
                     session.close();
                     let session2 = driver.session();
                     query = "match (a:Person { name: $author }) create (b:Article { id: $id, author: $author, title: $title, body: $body, publishDate: $publishDate, reads: 0, likes: 0, dislikes: 0 }) merge (a)-[r:PUBLISHED]->(b) return b"
@@ -476,11 +476,23 @@ const createOneArticle = async (article) => {
                             return true;
                         }
                     }
+                } else if (nodeExists.records.length > 0) {
+                    session.close();
+                    let session2 = driver.session();
+                    query = "match (a:Article { id: $id}) set a.title = $title, a.body = $body return a";
+                    params = {id: article._id, title: article.title, body: article.body };
+                    let updatedArticle = await session2.run(query, params);
+                    if (updatedArticle) {
+                        return true;
+                    } else {
+                        return false;
+                    }
                 }
             }
         }
         return false;
     } catch (err) {
+        console.log(err);
         return false;
     }
 }

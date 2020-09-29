@@ -386,58 +386,80 @@ module.exports = function(io) {
         try {
             if (req.body.body && req.body.title && req.body.author) {
                 if (req.body.body.length > 0 && req.body.title.length > 0 && req.body.title.length < 202 && req.body.author.length > 0) {
-                    const articleExists = await Article.findOne({ title: req.body.title, author: req.body.author });
+                    let queryData = { title: req.body.title, author: req.body.author };
+                    if (req.body.edit) {
+                        queryData = { _id: req.body.id };
+                    }
+                    const articleExists = await Article.findOne(queryData);
                     const userExists = await User.findOne({ username: req.body.author });
                     let uuid = uuidv4().split("-").join("");
                     if (userExists) {
-                        if (articleExists) {
+                        if (articleExists && !req.body.edit) {
                             return res.json({ querystatus: "you have already posted an article with this title" });
                         } else {
-                            let i = 0;
-                            do {
-                                let articleUuidTaken = await Article.findOne({ _id: uuid });
-                                if (!articleUuidTaken) {
-                                    i = 3;
-                                    let responseTo = "";
-                                    let responseType = "";
-                                    if (req.body.responseTo && req.body.responseType) {
-                                        responseTo = req.body.responseTo;
-                                        responseType = req.body.responseType;
-                                    }
-                                    const article = {
-                                        _id: uuid,
-                                        author: req.body.author,
-                                        title: req.body.title,
-                                        body: req.body.body,
-                                        publishDate: new Date().toLocaleString(),
-                                        responseTo: responseTo,
-                                        responseType: responseType
-                                    }
-                                    const articleTrim = {
-                                        id: article._id,
-                                        publishDate: article.publishDate
-                                    }
-                                    // Create articles on mongodb and neo4j
-                                    const createdArticle = await Article.create(article);
-                                    const neoCreatedArticle = await neo.createOneArticle(article);
-                                    if (createdArticle && neoCreatedArticle) { // If article copies created successfully, make record on user mongodb document
-                                        let recordArticleUserDoc = await User.findOneAndUpdate({ username: article.author }, { $addToSet: { "articles": articleTrim }}, { new: true }).lean();
-                                        if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on last mongo db call (map through all users articles for match), return success response else delete both and return failed response
-                                            return res.json({ querystatus: "article posted"});
+                            if (!req.body.edit) {
+                                let i = 0;
+                                do {
+                                    let articleUuidTaken = await Article.findOne({ _id: uuid });
+                                    if (!articleUuidTaken) {
+                                        i = 3;
+                                        let responseTo = "";
+                                        let responseType = "";
+                                        if (req.body.responseTo && req.body.responseType) {
+                                            responseTo = req.body.responseTo;
+                                            responseType = req.body.responseType;
+                                        }
+                                        const article = {
+                                            _id: uuid,
+                                            author: req.body.author,
+                                            title: req.body.title,
+                                            body: req.body.body,
+                                            publishDate: new Date().toLocaleString(),
+                                            responseTo: responseTo,
+                                            responseType: responseType
+                                        }
+                                        const articleTrim = {
+                                            id: article._id,
+                                            publishDate: article.publishDate
+                                        }
+                                        // Create articles on mongodb and neo4j
+                                        const createdArticle = await Article.create(article);
+                                        const neoCreatedArticle = await neo.createOneArticle(article);
+                                        if (createdArticle && neoCreatedArticle) { // If article copies created successfully, make record on user mongodb document
+                                            let recordArticleUserDoc = await User.findOneAndUpdate({ username: article.author }, { $addToSet: { "articles": articleTrim }}, { new: true }).lean();
+                                            if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on last mongo db call (map through all users articles for match), return success response else delete both and return failed response
+                                                return res.json({ querystatus: "article posted"});
+                                            } else {
+                                                neo.deleteOneArticle(article._id);
+                                                Article.deleteOne({ _id: uuid});
+                                                return res.json({ querystatus: "failed to post article" });
+                                            }
                                         } else {
-                                            neo.deleteOneArticle(article._id);
-                                            Article.deleteOne({ _id: uuid});
+                                            // either failed, delete both
+                                            // article was not recorded on mongo and neo4j
                                             return res.json({ querystatus: "failed to post article" });
                                         }
-                                    } else {
-                                        // either failed, delete both
-                                        // article was not recorded on mongo and neo4j
-                                        return res.json({ querystatus: "failed to post article" });
                                     }
+                                    uuid = uuidv4().split("-").join("");
+                                    i++;
+                                } while (i < 3);
+                            } else if (articleExists) { // Runs if article exists and user is trying to update article
+                                const article = {
+                                            _id: articleExists._id,
+                                            author: req.body.author,
+                                            title: req.body.title,
+                                            body: req.body.body
+                                        }
+                                let updatedArticleRecord = await Article.findOneAndUpdate({ _id: article._id }, { title: article.title, body: article.body }, { new: true }).lean();
+                                let neoUpdatedArticle = await neo.createOneArticle(article, true);
+                                if (neoUpdatedArticle) {
+                                    return res.json({ querystatus: "article updated" });
+                                } else {
+                                    return res.json({ querystatus: "failed to update article" });
                                 }
-                                uuid = uuidv4().split("-").join("");
-                                i++;
-                            } while (i < 3);
+                            } else {
+                                return res.json({ querystatus: "failed to post/update article" });
+                            }
                         }
                     }
                 }
@@ -445,6 +467,7 @@ module.exports = function(io) {
             return res.json({ querystatus: "failed to post article" });
         } catch (err) {
             // Body value went wrong
+            console.log(err);
             return res.json({ querystatus: "failed to post article" });
         }
     }
