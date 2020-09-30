@@ -334,7 +334,12 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 if (!tags) {
                     tags = [];
                 }
-                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, thumbnailUrl: $thumbnailUrl }) return a";
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0";
+                if (thumbnailUrl) {
+                    query += ", thumbnailUrl: $thumbnailUrl }) return a";
+                } else {
+                    query += " }) return a";
+                }
                 let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl };
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {

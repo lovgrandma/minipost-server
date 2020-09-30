@@ -278,8 +278,13 @@ module.exports = function(io) {
 
     /* Publishes video with required information (title, mpd) in mongodb and neo4j graph db, also merges relationship in neo4j (author)-[PUBLISHED]->(video) */
     const publishVideo = async (req, res, next) => {
-        let image = path.parse(req.file.filename);
-        let thumbnailUrl = 'temp/' + image.name + "." + req.body.extension;
+        let image = null;
+        let thumbnailUrl = "";
+        console.log(req.body.thumbnailLoaded);
+        if (req.body.thumbnailLoaded && req.file) {
+            image = path.parse(req.file.filename);
+            thumbnailUrl = 'temp/' + image.name + "." + req.body.extension;
+        }
         try {
             if (req.body.title && req.body.user && req.body.mpd) {
                 if (req.body.title.length > 0 && req.body.mpd.length > 0) {
@@ -290,7 +295,10 @@ module.exports = function(io) {
                     let tags = req.body.tags;
                     let responseTo = req.body.responseTo;
                     let responseType = req.body.responseType;
-                    let serverThumbnailUrl = await processimage.processThumb(thumbnailUrl);
+                    let serverThumbnailUrl = null;
+                    if (req.body.thumbnailLoaded) {
+                        serverThumbnailUrl = await processimage.processThumb(thumbnailUrl);
+                    }
                     if (videoRecord && userRecord) {
                         let publishDate = new Date().toLocaleString();
                         Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
@@ -428,7 +436,7 @@ module.exports = function(io) {
                                         if (createdArticle && neoCreatedArticle) { // If article copies created successfully, make record on user mongodb document
                                             let recordArticleUserDoc = await User.findOneAndUpdate({ username: article.author }, { $addToSet: { "articles": articleTrim }}, { new: true }).lean();
                                             if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on last mongo db call (map through all users articles for match), return success response else delete both and return failed response
-                                                return res.json({ querystatus: "article posted"});
+                                                return res.json({ querystatus: "article posted", id: article._id });
                                             } else {
                                                 neo.deleteOneArticle(article._id);
                                                 Article.deleteOne({ _id: uuid});
@@ -453,7 +461,7 @@ module.exports = function(io) {
                                 let updatedArticleRecord = await Article.findOneAndUpdate({ _id: article._id }, { title: article.title, body: article.body }, { new: true }).lean();
                                 let neoUpdatedArticle = await neo.createOneArticle(article, true);
                                 if (neoUpdatedArticle) {
-                                    return res.json({ querystatus: "article updated" });
+                                    return res.json({ querystatus: "article updated", id: article._id });
                                 } else {
                                     return res.json({ querystatus: "failed to update article" });
                                 }
