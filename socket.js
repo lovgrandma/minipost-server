@@ -8,6 +8,8 @@ const router = express.Router();
 const User = require('./models/user');
 const Chat = require('./models/chat');
 const lzw = require('./scripts/compression/lzw');
+const { get } = require('./routes/utility.js');
+const neo = require('./routes/neo.js');
 
 exports = module.exports = function(io){
 
@@ -17,17 +19,21 @@ exports = module.exports = function(io){
 
     // Updates typing data and emits typing to room. Typing only updates if username != user that sent message
     let updateType = (socket, data) => {
-        let promise = new Promise(function(resolve, reject) {
-            let decom = lzw.decompress(data); // decompress data to check which room to send to.
-            const regex = /([a-z0-9.]*);([^]*);(.*)/;
-            if (decom) {
-                io.to(decom.match(regex)[3]).emit('typing', data); // echo typing data back to room
-                resolve("complete");
-            } else {
-                reject(new Error("data too complex to be decompressed for typing update"));
-            }
-        });
-        promise.catch(error => console.log(error.message));
+        try {
+            let promise = new Promise(function(resolve, reject) {
+                let decom = lzw.decompress(data); // decompress data to check which room to send to.
+                const regex = /([a-z0-9.]*);([^]*);(.*)/;
+                if (decom) {
+                    io.to(decom.match(regex)[3]).emit('typing', data); // echo typing data back to room
+                    resolve("complete");
+                } else {
+                    reject(new Error("data too complex to be decompressed for typing update"));
+                }
+            });
+            promise.catch(error => console.log(error.message));
+        } catch (err) {
+            // something went wrong
+        }
     }
 
     // Updates redis db with a single chat
@@ -106,12 +112,34 @@ exports = module.exports = function(io){
         socket.emit("returnConvos", rooms); // emit back rooms joined
     }
 
-    // mapper method
+    let followChannel = async (socket, data) => {
+        try {
+            if (get(socket, 'rooms') && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)) {
+                if (mapper(socket.rooms) && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[1] && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[2] && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[3]) {
+                    console.log(mapper(socket.rooms)[0], data);
+                    const room = mapper(socket.rooms)[0];
+                    // update neo4j and make redis call, return notifications from channel redis record
+                    neo.setFollows(data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[1], data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[2], data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[3]).then((result) => {
+                        console.log(result);
+                    });
+                }
+            }
+        } catch (err) {
+            // Something went wrong
+        }
+    }
+
+    // Maps object and key's to array
     let mapper = function(group) {
-        group = Object.keys(group).map(function(key) {
-            return group[key];
-        });
-        return group;
+        try {
+            group = Object.keys(group).map(function(key) {
+                return group[key];
+            });
+            return group;
+        } catch (err) {
+            return null;
+        }
+        return null;
     }
 
 
@@ -246,6 +274,10 @@ exports = module.exports = function(io){
             const bumpRegex = /([^]*);([^]*);([^]*);(.*)/; // regex for reading 'bump' emits
             let room = data.match(bumpRegex)[4];
             io.to(room).emit('bump', data);
+        })
+
+        socket.on('follow', (data) => {
+            followChannel(socket, data);
         })
 
         socket.on("disconnect", () => { // Should update mongodb on every disconnect

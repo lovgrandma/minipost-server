@@ -78,12 +78,14 @@ module.exports = function(io) {
             console.log("waiting " + jobId);
             videoQueue.getJob(jobId).then(function(job) {
                 try {
-                    job.getState().then(function(result) {
+                    job.getState().then(async function(result) {
                         if (result) {
                             if (result == 'waiting') {
                                 if (job.attemptsMade < 3 && job.attemptsMade > 0) {
                                     try {
-                                        job.retry();
+                                        if ([null, failed].indexOf(await job.getState()) == 0) {
+                                            job.retry();
+                                        }
                                     } catch (err) {
                                         console.log(err);
                                     }
@@ -644,7 +646,6 @@ module.exports = function(io) {
                                 var err = new Error('Email already exists');
                                 err.status = 401;
                                 err.type = 'register error';
-                                console.log(err);
                                 return next(err);
                             }
                         }).lean();
@@ -652,14 +653,12 @@ module.exports = function(io) {
                         var err = new Error('User already exists');
                         err.status = 401;
                         err.type = 'register error';
-                        console.log(err);
                         return next(err);
                     }
                 } else {
                     var err = new Error('Username must be be 5 to 22 characters long');
                     err.status = 400;
                     err.type = 'register error';
-                    console.log(err);
                     return next(err);
                 }
             }).lean();
@@ -758,7 +757,6 @@ module.exports = function(io) {
                                       {new: true},
                                       function(err, result) {
                     if (err) throw err;
-                    console.log(result); // addusertopendinglist fired
                     res.json(result);
                 }).lean();
             }
@@ -1192,9 +1190,10 @@ module.exports = function(io) {
                                     // Video was removed from user's document on mongodb since it has been 4 hours since it began converting. Too long.
                                 }).lean();
                             } else {
+                                const videoData = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
                                 responded = true;
-                                return res.json({ querystatus: video.id + ";processing"  });
+                                return res.json({ querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: videoData.tags  });
                                 break;
                             }
                         } else if (video.state.toString().match(/([0-9].*);awaitinginfo/)) {
@@ -1404,18 +1403,14 @@ module.exports = function(io) {
                             // This logic will most likely never occur
                             res.json({querystatus: 'You don\'t belong to this chat'});
                         }
-
                     } else { // Chat doesnt exist, but still friends, start new chatlog with user as host.
                         console.log('chat doesnt exist');
-
                         let generateUuid = async (data) => {
                             let temp;
                             let uuidTaken;
                             do {
                                 temp = uuidv4(); // create new uuid
-                                console.log("temp " + temp);
                                 uuidTaken = await Chat.findOne({_id: temp}).lean(); // check if uuid is taken
-                                console.log("uuid taken? " + uuidTaken);
                             } while (uuidTaken); // if uuid is taken, run again and create new uuid
                             return temp;
                         }

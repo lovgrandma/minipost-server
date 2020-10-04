@@ -1232,6 +1232,67 @@ const fetchProfilePageData = async (user) => {
     }
 }
 
+const setFollows = async (user, channel, subscribe) => {
+    try {
+        if (user && channel) {
+            let session = driver.session();
+            let query = "match (a:Person { name: $user }), (c:Person { name: $channel }) optional match (a)-[r:FOLLOWS]->(b:Person)"
+            if (subscribe) {
+                query += " merge (a)-[:FOLLOWS]->(c) return a, r, b, c";
+            } else {
+                query += ", (a)-[r2:FOLLOWS]->(c) delete r2 return a, r, b, c";
+            }
+            let params = { user: user, channel: channel };
+            return await session.run(query, params)
+                .then((result) => {
+                    let channels = [];
+                    if (checkGoodResultsCeremony(result.records)) {
+                        result.records.map(record =>
+                            record._fields ?
+                                record._fields[2] ?
+                                    record._fields[2].properties.name ?
+                                        channels.push(record._fields[2].properties.name)
+                                    : null
+                                : null
+                            : null
+                        );
+                        if (result.records[0]._fields[3] && subscribe) {
+                            if (get(result.records[0]._fields[3], 'properties.name')) {
+                                if (channels.indexOf(channel) < 0) {
+                                    channels.push(result.records[0]._fields[3].properties.name)
+                                }
+                            }
+                        }
+                    }
+                    return channels;
+                })
+                .catch((err) => {
+                    console.log(err);
+                    return [];
+                })
+        }
+    } catch (err) {
+        // Something went wrong
+        return [];
+    }
+    return [];
+}
+
+const checkGoodResultsCeremony = (records) => {
+    if (records) {
+        if (records.length > 0) {
+            if (records[0]._fields) {
+                if (records[0]._fields[0]) {
+                    if (records[0]._fields[0].properties) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 module.exports = { checkFriends: checkFriends,
                  serveVideoRecommendations: serveVideoRecommendations,
                  createOneVideo: createOneVideo,
@@ -1242,4 +1303,6 @@ module.exports = { checkFriends: checkFriends,
                  incrementVideoView: incrementVideoView,
                  createOneUser: createOneUser,
                  incrementLike: incrementLike,
-                 fetchProfilePageData: fetchProfilePageData };
+                 fetchProfilePageData: fetchProfilePageData,
+                 setFollows: setFollows
+                 };
