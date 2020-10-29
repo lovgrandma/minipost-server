@@ -282,7 +282,7 @@ module.exports = function(io) {
     const publishVideo = async (req, res, next) => {
         let image = null;
         let thumbnailUrl = "";
-        console.log(req.body.thumbnailLoaded);
+        console.log(req.body);
         if (req.body.thumbnailLoaded && req.file) {
             image = path.parse(req.file.filename);
             thumbnailUrl = 'temp/' + image.name + "." + req.body.extension;
@@ -324,6 +324,7 @@ module.exports = function(io) {
                                 User.findOne({ username: req.body.user }, async function(err, user) {
                                     if (err) {
                                         // "Error finding user in mongoDb"
+                                        res.json({ querystatus: "error publishing/updating"});
                                     } else {
                                         let foundOne = false;
                                         let updateValue;
@@ -334,6 +335,7 @@ module.exports = function(io) {
                                                 if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
                                                     updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
                                                     userUpdated = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
+                                                    await neo.updateChannelNotifications(userRecord._id, { mpd: req.body.mpd, title: req.body.title, author: req.body.user, published: publishDate, description: desc });
                                                     break;
                                                 }
                                             }
@@ -1193,7 +1195,11 @@ module.exports = function(io) {
                                 const videoData = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
                                 responded = true;
-                                return res.json({ querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: videoData.tags  });
+                                let tagArr = [];
+                                videoData.tags.forEach((node) => {
+                                    tagArr = tagArr.concat(node.split(","));
+                                });
+                                return res.json({ querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: tagArr  });
                                 break;
                             }
                         } else if (video.state.toString().match(/([0-9].*);awaitinginfo/)) {

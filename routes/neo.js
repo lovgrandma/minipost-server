@@ -75,12 +75,12 @@ const serveRandomTrendingVideos = async (user = "") => {
         .then(async (result) => {
             if (result) {
                 let graphRecords = result.records;
-                // Remove all records with empty titles. This will remove videos that have been uploaded to db but have not yet been published by user
+                // Remove all records with empty titles and are not published. This will remove videos that have been uploaded to db but have not yet been published by user
                 graphRecords.forEach((record, i) => {
                     if (record._fields) {
                         if (record._fields[0]) {
                             if (record._fields[0].properties) {
-                                if (!record._fields[0].properties.title) {
+                                if (!record._fields[0].properties.title || !record._fields[0].properties.published) {
                                     graphRecords.splice(i, 1);
                                 }
                             }
@@ -325,22 +325,32 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
             return await checkNodeExists(mpd);
         })
         .then(async (result) => {
+            let videoMongo = await Video.findOne({ _id: mpd }).lean();
+            let videoPublished = false;
+            // If mongo document is not in the format of "1603903019000;processing" or "1603903019000;awaitinginfo" then video is published
+            if (videoMongo) {
+                if (videoMongo.state) {
+                    if (!videoMongo.state.match(/([0-9].*);([a-z].*)/)) {
+                        videoPublished = true;
+                    }
+                }
+            }
             session = driver.session();
             /* If result is null, create new video else update existing video in graph db */
-            if (!result) {
+            if (!result && videoMongo) {
                 if (!description) {
                     description = "";
                 }
                 if (!tags) {
                     tags = [];
                 }
-                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0";
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished";
                 if (thumbnailUrl) {
                     query += ", thumbnailUrl: $thumbnailUrl }) return a";
                 } else {
                     query += " }) return a";
                 }
-                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl };
+                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl, videoPublished: videoPublished };
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {
                         session.close();
@@ -416,6 +426,14 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 addedOne = 0;
                 query += "tags: $tags";
                 params.tags = tags;
+                addedOne++;
+                addedOne > 0 ? query += ", " : null;
+                addedOne = 0;
+                if (videoMongo) {
+                    if (videoPublished) {
+                        query+= "published: true";
+                    }
+                }
                 query += " } return a";
                 const videoRecordUpdated = await session.run(query, params)
                     .then(async (record) => {
@@ -525,6 +543,8 @@ const deleteOneArticle = async (id) => {
 
 // Sometimes there can be records with empty fields. This will ensure that errors do not occur when trying to access nonexistent data members
 const resolveEmptyData = (record, type, dataType = "string") => {
+    console.log(record, type);
+    console.log(record._fields[0].properties);
     let placeholder = "";
     if (dataType == "number") {
         placeholder = 0;
@@ -840,6 +860,123 @@ const incrementVideoView = async (mpd, user) => {
         return false;
     }
     return false;
+}
+
+// Takes in array of semi-colon delimited value pairs like so [...046cd2f4-1f2b-4409-bcf8-cc17b0a2b67a;bliff] and organizes subscribed list and notifications of subscribers
+const getChannelNotifications = async (channels) => {
+    try {
+        let redisAccessible = true;
+        let data = {
+            subscribed: [
+
+            ],
+            notifications: [
+
+            ]
+        };
+        let promiseCheckAndReturnNotifications = channels.map(channel => {
+            return new Promise( async (resolve, reject) => {
+                if (channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)) {
+                    data.subscribed.push(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[2]);
+                    return await rediscontentclient.select(3, async function(err, res) {
+                        if (!redisAccessible) {
+                            reject(null);
+                        }
+                        if (res == "OK") {
+                            return rediscontentclient.get(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[1], (err, value) => {
+                                resolve(JSON.parse(value));
+                                if (!err) {
+                                    return value;
+                                }
+                                return null;
+                            });
+                        } else {
+                            redisAccessible = false;
+                        }
+                        return null;
+                    });
+                }
+                reject(null);
+            })
+        });
+        if (redisAccessible) {
+            return await Promise.all(promiseCheckAndReturnNotifications).then((result) => {
+                if (Array.isArray(result)) {
+                    if (result.length > 0) {
+                        result.forEach((x, i) => {
+                            if (result[i] == null) {
+                                result = result.splice(i, 1);
+                            }
+                        })
+                        if (result.length == 1 && result[0] == null || !result) {
+                            return data;
+                        }
+                        data.notifications = [...result.flat()];
+                        return data;
+                    }
+                }
+                return data;
+            })
+        }
+        return data;
+    } catch (err) {
+        // Something went wrong
+        return [];
+    }
+}
+
+// Channel is id
+const updateChannelNotifications = async(channel, data) => {
+    try {
+        const appendNotificationArr = (value, data) => {
+            if (value.length) {
+                if (value.length > 10) {
+                    value = value.slice(0, 10); // Slice array if too long
+                }
+                value.map((x, i) => {
+                    if (data.mpd && x.mpd) {
+                        if (data.mpd == x.mpd) {
+                            value.splice(i, 1);
+                        }
+                    }
+                });
+                value.push(data);
+                return value;
+            }
+        }
+        let redisAccessible = true;
+        return new Promise( async (resolve, reject) => {
+            return await rediscontentclient.select(3, async function(err, res) {
+                if (res == "OK") {
+                    return rediscontentclient.get(channel, (err, value) => {
+                        if (!value) {
+                            rediscontentclient.set(channel, JSON.stringify([data]));
+                            return rediscontentclient.get(channel, (err, value) => {
+                                if (value) {
+                                    value = JSON.parse(value);
+                                    value = appendNotificationArr(value, data);
+                                    rediscontentclient.set(channel, JSON.stringify(value));
+                                    resolve(true);
+                                }
+                            });
+                        } else {
+                            value = JSON.parse(value);
+                            value = appendNotificationArr(value, data);
+                            rediscontentclient.set(channel, JSON.stringify(value));
+                            resolve(true);
+                        }
+                        reject(false);
+                    });
+                } else {
+                    redisAccessible = false;
+                }
+                reject(false);
+            });
+        });
+    } catch (err) {
+        // Something went wrong
+        return false;
+    }
 }
 
 // Used critically to remove like of opposite type. If user has liked but dislike was incremented, like must be decremented. Returns appropriate value for redis record update
@@ -1247,19 +1384,21 @@ const setFollows = async (user, channel, subscribe) => {
                 .then((result) => {
                     let channels = [];
                     if (checkGoodResultsCeremony(result.records)) {
+                        // Map through results and return ids of all channels to return data
                         result.records.map(record =>
                             record._fields ?
                                 record._fields[2] ?
-                                    record._fields[2].properties.name ?
-                                        channels.push(record._fields[2].properties.name)
+                                    record._fields[2].properties.id && record._fields[2].properties.name ?
+                                        channels.push(record._fields[2].properties.id + ";" + record._fields[2].properties.name)
                                     : null
                                 : null
                             : null
                         );
+                        // Add user just followed to list of channels to return
                         if (result.records[0]._fields[3] && subscribe) {
-                            if (get(result.records[0]._fields[3], 'properties.name')) {
-                                if (channels.indexOf(channel) < 0) {
-                                    channels.push(result.records[0]._fields[3].properties.name)
+                            if (get(result.records[0]._fields[3], 'properties.id') && get(result.records[0]._fields[3], 'properties.name')) {
+                                if (channels.indexOf(result.records[0]._fields[3].properties.id + ";" + result.records[0]._fields[3].properties.name) < 0) {
+                                    channels.push(result.records[0]._fields[3].properties.id + ";" + result.records[0]._fields[3].properties.name);
                                 }
                             }
                         }
@@ -1304,5 +1443,7 @@ module.exports = { checkFriends: checkFriends,
                  createOneUser: createOneUser,
                  incrementLike: incrementLike,
                  fetchProfilePageData: fetchProfilePageData,
-                 setFollows: setFollows
+                 setFollows: setFollows,
+                 getChannelNotifications: getChannelNotifications,
+                 updateChannelNotifications: updateChannelNotifications
                  };

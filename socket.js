@@ -112,16 +112,28 @@ exports = module.exports = function(io){
         socket.emit("returnConvos", rooms); // emit back rooms joined
     }
 
+    // data will look like: user:channel:followunfollow?
     let followChannel = async (socket, data) => {
         try {
             if (get(socket, 'rooms') && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)) {
                 if (mapper(socket.rooms) && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[1] && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[2] && data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[3]) {
-                    console.log(mapper(socket.rooms)[0], data);
                     const room = mapper(socket.rooms)[0];
-                    // update neo4j and make redis call, return notifications from channel redis record
-                    neo.setFollows(data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[1], data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[2], data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[3]).then((result) => {
-                        console.log(result);
+                    // update neo4j and make redis call, return notifications from channel redis record. user channel subscribe
+                    let user = data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[1];
+                    let channel = data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[2];
+                    let subscribe = data.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*);(true|false)/)[3];
+                    // setFollows will return the channels the user is following in neo4j
+                    let channels = await neo.setFollows(user, channel, subscribe).then( async (result) => {
+                        return await neo.getChannelNotifications(result); // Returns notifications for all channels in result
                     });
+                    if (Array.isArray(channels.notifications)) {
+                        for (let i = 0; i < channels.notifications.length; i++) {
+                            if (!channels.notifications[i] && channels.notifications.length > 0) {
+                                channels = channels.notifications.splice(i, 1);
+                            }
+                        }
+                        socket.emit('returnNotif', channels);
+                    }
                 }
             }
         } catch (err) {
