@@ -126,14 +126,8 @@ exports = module.exports = function(io){
                     let channels = await neo.setFollows(user, channel, subscribe).then( async (result) => {
                         return await neo.getChannelNotifications(result); // Returns notifications for all channels in result
                     });
-                    if (Array.isArray(channels.notifications)) {
-                        for (let i = 0; i < channels.notifications.length; i++) {
-                            if (!channels.notifications[i] && channels.notifications.length > 0) {
-                                channels = channels.notifications.splice(i, 1);
-                            }
-                        }
-                        socket.emit('returnNotif', channels);
-                    }
+                    console.log(channels);
+                    socket.emit('returnNotif', channels);
                 }
             }
         } catch (err) {

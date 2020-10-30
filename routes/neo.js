@@ -415,7 +415,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 }
                 addedOne > 0 ? query += ", " : null;
                 addedOne = 0;
-                if (nudity) {
+                if (nudity == true) {
                     query += "nudity: true";
                     addedOne++;
                 } else {
@@ -426,11 +426,11 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 addedOne = 0;
                 query += "tags: $tags";
                 params.tags = tags;
-                addedOne++;
-                addedOne > 0 ? query += ", " : null;
-                addedOne = 0;
                 if (videoMongo) {
                     if (videoPublished) {
+                        addedOne++;
+                        addedOne > 0 ? query += ", " : null;
+                        addedOne = 0;
                         query+= "published: true";
                     }
                 }
@@ -862,82 +862,75 @@ const incrementVideoView = async (mpd, user) => {
     return false;
 }
 
-// Takes in array of semi-colon delimited value pairs like so [...046cd2f4-1f2b-4409-bcf8-cc17b0a2b67a;bliff] and organizes subscribed list and notifications of subscribers
+// Takes in array of semi-colon delimited value pairs like so [..., "046cd2f4-1f2b-4409-bcf8-cc17b0a2b67a;bliff", ...] and organizes subscribed list and notifications of subscribers
 const getChannelNotifications = async (channels) => {
     try {
         let redisAccessible = true;
         let data = {
             subscribed: [
 
-            ],
-            notifications: [
-
             ]
         };
         let promiseCheckAndReturnNotifications = channels.map(channel => {
             return new Promise( async (resolve, reject) => {
                 if (channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)) {
-                    data.subscribed.push(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[2]);
-                    return await rediscontentclient.select(3, async function(err, res) {
-                        if (!redisAccessible) {
-                            reject(null);
+                    if (channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[1] && channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[2]) {
+                        let channelData = {
+                            channel: channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[2],
+                            notifications: []
                         }
-                        if (res == "OK") {
-                            return rediscontentclient.get(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[1], (err, value) => {
-                                resolve(JSON.parse(value));
-                                if (!err) {
-                                    return value;
-                                }
-                                return null;
-                            });
-                        } else {
-                            redisAccessible = false;
-                        }
+                        return await rediscontentclient.select(3, async function(err, res) {
+                            if (!redisAccessible) {
+                                reject(null);
+                            }
+                            if (res == "OK") {
+                                return rediscontentclient.get(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[1], (err, value) => {
+                                    if (JSON.parse(value) != null) {
+                                        channelData.notifications = JSON.parse(value);
+                                    }
+                                    data.subscribed.push(channelData);
+                                    resolve(JSON.parse(value));
+                                    if (!err) {
+                                        return value;
+                                    }
+                                    return null;
+                                });
+                            } else {
+                                redisAccessible = false;
+                                reject(null);
+                            }
+                        });
+                    } else {
                         return null;
-                    });
+                    }
                 }
                 reject(null);
             })
         });
         if (redisAccessible) {
             return await Promise.all(promiseCheckAndReturnNotifications).then((result) => {
-                if (Array.isArray(result)) {
-                    if (result.length > 0) {
-                        result.forEach((x, i) => {
-                            if (result[i] == null) {
-                                result = result.splice(i, 1);
-                            }
-                        })
-                        if (result.length == 1 && result[0] == null || !result) {
-                            return data;
-                        }
-                        data.notifications = [...result.flat()];
-                        return data;
-                    }
-                }
                 return data;
             })
         }
         return data;
     } catch (err) {
-        // Something went wrong
+        console.log(err);
         return [];
     }
 }
 
-// Channel is id
+// Channel is user id. Data should be mpds or article ids.
 const updateChannelNotifications = async(channel, data) => {
     try {
+        // Value is the values returned by redis db and data is the new data to be appended to notifications
         const appendNotificationArr = (value, data) => {
             if (value.length) {
                 if (value.length > 10) {
-                    value = value.slice(0, 10); // Slice array if too long
+                    value = value.slice(0, 10); // Slice array if too long. Start index 0, end index 10
                 }
                 value.map((x, i) => {
-                    if (data.mpd && x.mpd) {
-                        if (data.mpd == x.mpd) {
-                            value.splice(i, 1);
-                        }
+                    if (x == data) {
+                        value.splice(i, 1); // Get rid of duplicates
                     }
                 });
                 value.push(data);
@@ -1369,6 +1362,44 @@ const fetchProfilePageData = async (user) => {
     }
 }
 
+// Return channels user is following
+const getFollows = async (user) => {
+    try {
+        if (user && channel) {
+            let session = driver.session();
+            let query = "match (a:Person { name: $user })-[r:FOLLOWS]->()";
+            let params = { user: user };
+            return await session.run(query, params)
+                .then((result) => {
+                    let channels = [];
+                    if (checkGoodResultsCeremony(result.records)) {
+                        // Map through results and return ids of all channels to return data
+                        console.log(result.records);
+//                        result.records.map(record =>
+//                            record._fields ?
+//                                record._fields[2] ?
+//                                    record._fields[2].properties.id && record._fields[2].properties.name ?
+//                                        channels.push(record._fields[2].properties.id + ";" + record._fields[2].properties.name)
+//                                    : null
+//                                : null
+//                            : null
+//                        );
+                    }
+                    return channels;
+                })
+                .catch((err) => {
+                    console.log(err);
+                    return [];
+                })
+        }
+    } catch (err) {
+        // Something went wrong
+        return [];
+    }
+    return [];
+}
+
+// Set following relationship for user to one channel, either subscribe or unsubscribe
 const setFollows = async (user, channel, subscribe) => {
     try {
         if (user && channel) {

@@ -335,7 +335,6 @@ module.exports = function(io) {
                                                 if (user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)) {
                                                     updateValue = user.videos[i].state.match(/([a-z0-9]*);awaitinginfo/)[1];
                                                     userUpdated = await User.findOneAndUpdate({ username: req.body.user, "videos.id": req.body.mpd }, {$set: {"videos.$.state": updateValue }}).lean();
-                                                    await neo.updateChannelNotifications(userRecord._id, { mpd: req.body.mpd, title: req.body.title, author: req.body.user, published: publishDate, description: desc });
                                                     break;
                                                 }
                                             }
