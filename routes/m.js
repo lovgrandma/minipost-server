@@ -489,7 +489,7 @@ module.exports = function(io) {
     const policy = cloudfrontconfig.policy;
 
     // Set cloudfront cookies
-    const setCloudCookies = (req, res) => {
+    const setCloudCookies = async (req, res) => {
         const cookie = cloudFront.getSignedCookie({
             policy
         });
@@ -1238,23 +1238,33 @@ module.exports = function(io) {
         res.json(await neo.fetchSingleArticleData(req.body.id, req.body.user ));
     }
 
+    // Will get friends for specified user on request and return notifications/following list aswell
     const getfriends = async (req, res, next) => {
-        User.findOne({username: req.body.username}, {username: 1, friends: 1} , async (err, result) => {
-            if (err) throw err;
-            let data = {
-                userfriendslist: [],
-                conversations: []
-            }
-            if (result) {
-                if (result.friends) {
-                    data.userfriendslist = result.friends[0].confirmed;
+        let data = {
+            userfriendslist: [],
+            conversations: [],
+            subscribed: []
+        }
+        if (req.body.username) {
+            User.findOne({username: req.body.username}, {username: 1, friends: 1} , async (err, result) => {
+                if (err) throw err;
+                if (result) {
+                    if (result.friends) {
+                        data.userfriendslist = result.friends[0].confirmed;
+                    }
+                    req.body.getconversations = true;
+                    data.conversations = await getconversationlogs(req, res, next);
                 }
-                req.body.getconversations = true;
-                data.conversations = await getconversationlogs(req, res, next);
+                // Get all following channels and notifications per channel
+                data.subscribed = await neo.getFollows(req.body.username).then( async (result) => {
+                    let temp = await neo.getChannelNotifications(result);
+                    return temp.subscribed;
+                });
                 return res.json(data);
-            }
+            }).lean();
+        } else {
             return res.json(data);
-        }).lean();
+        }
     }
 
     // Sends chat message to a chat document.

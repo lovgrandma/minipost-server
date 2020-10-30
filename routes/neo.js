@@ -1365,25 +1365,24 @@ const fetchProfilePageData = async (user) => {
 // Return channels user is following
 const getFollows = async (user) => {
     try {
-        if (user && channel) {
+        if (user) {
             let session = driver.session();
-            let query = "match (a:Person { name: $user })-[r:FOLLOWS]->()";
+            let query = "match (a:Person { name: $user })-[r:FOLLOWS]->(b:Person) return a, r, b";
             let params = { user: user };
             return await session.run(query, params)
                 .then((result) => {
                     let channels = [];
                     if (checkGoodResultsCeremony(result.records)) {
                         // Map through results and return ids of all channels to return data
-                        console.log(result.records);
-//                        result.records.map(record =>
-//                            record._fields ?
-//                                record._fields[2] ?
-//                                    record._fields[2].properties.id && record._fields[2].properties.name ?
-//                                        channels.push(record._fields[2].properties.id + ";" + record._fields[2].properties.name)
-//                                    : null
-//                                : null
-//                            : null
-//                        );
+                        result.records.map(record =>
+                            record._fields ?
+                                record._fields[2] ?
+                                    record._fields[2].properties.id && record._fields[2].properties.name ?
+                                        channels.push(record._fields[2].properties.id + ";" + record._fields[2].properties.name)
+                                    : null
+                                : null
+                            : null
+                        );
                     }
                     return channels;
                 })
@@ -1404,8 +1403,8 @@ const setFollows = async (user, channel, subscribe) => {
     try {
         if (user && channel) {
             let session = driver.session();
-            let query = "match (a:Person { name: $user }), (c:Person { name: $channel }) optional match (a)-[r:FOLLOWS]->(b:Person)"
-            if (subscribe) {
+            let query = "match (a:Person { name: $user }), (c:Person { name: $channel }) optional match (a)-[r:FOLLOWS]->(b:Person)";
+            if (subscribe == "true") { // The value of subscribe (boolean) is coming in as a string, dont worry about it. Yeah I know. It works
                 query += " merge (a)-[:FOLLOWS]->(c) return a, r, b, c";
             } else {
                 query += ", (a)-[r2:FOLLOWS]->(c) delete r2 return a, r, b, c";
@@ -1426,7 +1425,7 @@ const setFollows = async (user, channel, subscribe) => {
                             : null
                         );
                         // Add user just followed to list of channels to return
-                        if (result.records[0]._fields[3] && subscribe) {
+                        if (result.records[0]._fields[3] && subscribe == "true") {
                             if (get(result.records[0]._fields[3], 'properties.id') && get(result.records[0]._fields[3], 'properties.name')) {
                                 if (channels.indexOf(result.records[0]._fields[3].properties.id + ";" + result.records[0]._fields[3].properties.name) < 0) {
                                     channels.push(result.records[0]._fields[3].properties.id + ";" + result.records[0]._fields[3].properties.name);
@@ -1475,6 +1474,7 @@ module.exports = { checkFriends: checkFriends,
                  incrementLike: incrementLike,
                  fetchProfilePageData: fetchProfilePageData,
                  setFollows: setFollows,
+                 getFollows: getFollows,
                  getChannelNotifications: getChannelNotifications,
                  updateChannelNotifications: updateChannelNotifications
                  };
