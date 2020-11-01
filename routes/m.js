@@ -439,6 +439,7 @@ module.exports = function(io) {
                                         if (createdArticle && neoCreatedArticle) { // If article copies created successfully, make record on user mongodb document
                                             let recordArticleUserDoc = await User.findOneAndUpdate({ username: article.author }, { $addToSet: { "articles": articleTrim }}, { new: true }).lean();
                                             if (recordArticleUserDoc.articles.map(function(obj) { return obj.id }).indexOf(articleTrim.id ) >= 0) { // If record successfully recorded on last mongo db call (map through all users articles for match), return success response else delete both and return failed response
+                                                neo.updateChannelNotifications(recordArticleUserDoc._id, articleTrim.id, "article");
                                                 return res.json({ querystatus: "article posted", id: article._id });
                                             } else {
                                                 neo.deleteOneArticle(article._id);
@@ -1480,6 +1481,27 @@ module.exports = function(io) {
         }
     }
 
+    // Gets data for a list of content
+    const fetchContentData = async (req, res, next) => {
+        try {
+            if (req.body) {
+                if (req.body.data) {
+                    let promise = await req.body.data.map(id => {
+                        return new Promise( async (resolve, reject) => {
+                            return resolve(neo.fetchContentData(id));
+                        })
+                    });
+                    let data = await Promise.all(promise);
+                    return res.json(data);
+                }
+            } else {
+                return res.json(false);
+            }
+        } catch (err) {
+            // Something went wrong
+        }
+    }
+
     /** Increments view of single video */
     const incrementView = async (req, res, next) => {
         if (req.body.mpd) {
@@ -1526,6 +1548,10 @@ module.exports = function(io) {
     router.get('/logout', (req, res, next) => {
         return logout(req, res, next);
     });
+
+    router.post('/fetchcontentdata', (req, res, next) => {
+        return fetchContentData(req, res, next);
+    })
 
     // SEARCH / GET USERS THAT MATCH THIS QUERY.
     router.post('/searchusers', (req, res, next) => {

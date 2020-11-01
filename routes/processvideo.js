@@ -307,7 +307,7 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                     // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
                     let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
                     neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null);
-                    neo.updateChannelNotifications(userUuid, generatedUuid);
+                    neo.updateChannelNotifications(userUuid, generatedUuid, "video");
                     deleteJob(true, job, mpd, room); // Success
                     deleteVideoArray(delArr, originalVideo, room, 10000);
                 }

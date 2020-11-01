@@ -231,6 +231,33 @@ const checkFriends = async (user) => {
     }
 }
 
+// Takes a single content reference id of type video or article and returns trimmed details
+const fetchContentData = async (id) => {
+    let session = driver.session();
+    if (id.match(/(v|a)-([A-Za-z0-9-].*)/)) {
+        let query = "";
+        let validId = false;
+        if (id.match(/(v|a)-([A-Za-z0-9-].*)/)[1] == "v") {
+            query = "match (a:Video {mpd: $id}) return a";
+            validId = true;
+        } else if (id.match(/(v|a)-([A-Za-z0-9-].*)/)[1] == "a") {
+            query = "match (a:Article {id: $id}) return a";
+            validId = true;
+        }
+        if (validId == true) {
+            id = id.match(/(v|a)-([A-Za-z0-9-].*)/)[2];
+            let params = { id: id };
+            console.log(query);
+            let content = await session.run(query, params)
+                .then(async (result) => {
+                    session.close();
+                    return result.records[0]._fields[0].properties;
+                });
+            return content;
+        }
+    }
+}
+
 /* Check if individual mongo user is represented in graph database */
 const checkUserExists = async (user) => {
     if (user && typeof user === 'string') {
@@ -342,7 +369,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                     description = "";
                 }
                 if (!tags) {
-                    tags = [];
+                    tags = "";
                 }
                 let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished";
                 if (thumbnailUrl) {
@@ -920,8 +947,13 @@ const getChannelNotifications = async (channels) => {
 }
 
 // Channel is user id. Data should be mpds or article ids.
-const updateChannelNotifications = async(channel, data) => {
+const updateChannelNotifications = async(channel, data, type) => {
     try {
+        if (type == "video") {
+            data = "v-" + data;
+        } else {
+            data = "a-" + data;
+        }
         // Value is the values returned by redis db and data is the new data to be appended to notifications
         const appendNotificationArr = (value, data) => {
             if (value.length) {
@@ -1404,7 +1436,13 @@ const setFollows = async (user, channel, subscribe) => {
         if (user && channel) {
             let session = driver.session();
             let query = "match (a:Person { name: $user }), (c:Person { name: $channel }) optional match (a)-[r:FOLLOWS]->(b:Person)";
-            if (subscribe == "true") { // The value of subscribe (boolean) is coming in as a string, dont worry about it. Yeah I know. It works
+            // The value of subscribe (boolean) is coming in as a string sometimes, dont worry about it. Yeah I know. It works
+            if (subscribe == "true") {
+                subscribe = true;
+            } else if (subscribe == "false") {
+                subscribe = false;
+            }
+            if (subscribe == true) {
                 query += " merge (a)-[:FOLLOWS]->(c) return a, r, b, c";
             } else {
                 query += ", (a)-[r2:FOLLOWS]->(c) delete r2 return a, r, b, c";
@@ -1425,7 +1463,7 @@ const setFollows = async (user, channel, subscribe) => {
                             : null
                         );
                         // Add user just followed to list of channels to return
-                        if (result.records[0]._fields[3] && subscribe == "true") {
+                        if (result.records[0]._fields[3] && subscribe == true) {
                             if (get(result.records[0]._fields[3], 'properties.id') && get(result.records[0]._fields[3], 'properties.name')) {
                                 if (channels.indexOf(result.records[0]._fields[3].properties.id + ";" + result.records[0]._fields[3].properties.name) < 0) {
                                     channels.push(result.records[0]._fields[3].properties.id + ";" + result.records[0]._fields[3].properties.name);
@@ -1433,6 +1471,7 @@ const setFollows = async (user, channel, subscribe) => {
                             }
                         }
                     }
+                console.log(channels);
                     return channels;
                 })
                 .catch((err) => {
@@ -1476,5 +1515,6 @@ module.exports = { checkFriends: checkFriends,
                  setFollows: setFollows,
                  getFollows: getFollows,
                  getChannelNotifications: getChannelNotifications,
-                 updateChannelNotifications: updateChannelNotifications
+                 updateChannelNotifications: updateChannelNotifications,
+                 fetchContentData: fetchContentData
                  };
