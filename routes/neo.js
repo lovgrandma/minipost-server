@@ -36,6 +36,12 @@ const serveVideoRecommendations = async (user = "", append = []) => {
             })
             .then( async (result) => {
                 let originalLength = append.length;
+                // If the length of the existing set of videos is greater than 0 then append and remove duplicates
+                // This function should incrementally get best videos using a loop until the length has reached a certain threshold.
+                // E.g get best recommended videos up to 15 and then return. E.g get 3 best recommended videos uploaded in last 24 hours, if only 2, go next and get best recommended videos in last week up to 4, returns 4. Return best in last month up to 3, returns 3. Get best in 6 months up to 3 returns 3. Get best in last year, returns 3. Total of 15 videos, remove duplicates, return all.
+                // Best would simply mean provided the videos this user has watched recently, return videos of similarity (similarity being:
+                // get watched videos of other users that have watched this same video by highest aggreggated watch count )
+                // so pass user, watched or unwatched filter to determine if to return watched videos, possibly a history maybe
                 if (append.length > 0) {
                     append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
                     if (append.length > 0) {
@@ -43,13 +49,15 @@ const serveVideoRecommendations = async (user = "", append = []) => {
                     }
                     return append;
                 }
+                // Else return first set of videos
                 return await serveRandomTrendingVideos(user);
             });
         } else {
-            return await serveRandomTrendingVideos();
+            // if we cannot get a username from the request then we will have to return random trneding videos
+            videoArray = await serveRandomTrendingVideos();
         }
     } else {
-        return await serveRandomTrendingVideos();
+        videoArray = await serveRandomTrendingVideos();
     }
     return videoArray;
 }
@@ -247,11 +255,14 @@ const fetchContentData = async (id) => {
         if (validId == true) {
             id = id.match(/(v|a)-([A-Za-z0-9-].*)/)[2];
             let params = { id: id };
-            console.log(query);
             let content = await session.run(query, params)
                 .then(async (result) => {
                     session.close();
-                    return result.records[0]._fields[0].properties;
+                    if (result.records[0]._fields[0].properties.title) {
+                        return result.records[0]._fields[0].properties;
+                    } else {
+                        return null;
+                    }
                 });
             return content;
         }

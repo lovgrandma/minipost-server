@@ -1492,6 +1492,11 @@ module.exports = function(io) {
                         })
                     });
                     let data = await Promise.all(promise);
+                    for (let i = 0; i < data.length; i++) {
+                        if (data[i] == null) {
+                            data.splice(i, 1);
+                        }
+                    }
                     return res.json(data);
                 }
             } else {
@@ -1549,6 +1554,12 @@ module.exports = function(io) {
         return logout(req, res, next);
     });
 
+    router.get('/search', (req, res, next) => {
+        console.log(req.query);
+        return res.json(true);
+    })
+
+    // FETCH CONTENT DATA
     router.post('/fetchcontentdata', (req, res, next) => {
         return fetchContentData(req, res, next);
     })
