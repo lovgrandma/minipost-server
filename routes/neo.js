@@ -13,10 +13,10 @@ const rediscontentclient = redisapp.rediscontentclient;
 const util = require('util');
 const path = require('path');
 const neo4j = require('neo4j-driver');
-const driver = neo4j.driver("bolt://localhost:7687", neo4j.auth.basic("neo4j", "git2003hp7474%"));
 const uuidv4 = require('uuid/v4');
 const cloudfrontconfig = require('./servecloudfront');
 const s3Cred = require('./api/s3credentials.js');
+const driver = neo4j.driver(s3Cred.neo.address, neo4j.auth.basic(s3Cred.neo.username, s3Cred.neo.password));
 const utility = require('./utility');
 const User = require('../models/user');
 const Chat = require('../models/chat');
@@ -382,12 +382,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 if (!tags) {
                     tags = "";
                 }
-                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished";
-                if (thumbnailUrl) {
-                    query += ", thumbnailUrl: $thumbnailUrl }) return a";
-                } else {
-                    query += " }) return a";
-                }
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl }) return a";
                 let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl, videoPublished: videoPublished };
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {
@@ -516,8 +511,12 @@ const createOneArticle = async (article, edit = false) => {
                 if (!nodeExists || nodeExists.records.length == 0 && !edit) {
                     session.close();
                     let session2 = driver.session();
-                    query = "match (a:Person { name: $author }) create (b:Article { id: $id, author: $author, title: $title, body: $body, publishDate: $publishDate, reads: 0, likes: 0, dislikes: 0 }) merge (a)-[r:PUBLISHED]->(b) return b"
-                    params = { id: article._id, author: article.author, title: article.title, body: article.body, publishDate: article.publishDate };
+                    query = "match (a:Person { name: $author }) create (b:Article { id: $id, author: $author, title: $title, body: $body, publishDate: $publishDate, thumbnailUrl: $thumbnailUrl, reads: 0, likes: 0, dislikes: 0 }) merge (a)-[r:PUBLISHED]->(b) return b";
+                    let thumbnailUrl = "";
+                    if (article.thumbnailUrl) {
+                        thumb = article.thumbnailUrl;
+                    }
+                    params = { id: article._id, author: article.author, title: article.title, body: article.body, publishDate: article.publishDate, thumbnailUrl: thumbnailUrl };
                     // Create article with relationship to author
                     let createdArticle = await session2.run(query, params)
                     if (createdArticle) {
@@ -540,8 +539,12 @@ const createOneArticle = async (article, edit = false) => {
                 } else if (nodeExists.records.length > 0) {
                     session.close();
                     let session2 = driver.session();
-                    query = "match (a:Article { id: $id}) set a.title = $title, a.body = $body return a";
-                    params = {id: article._id, title: article.title, body: article.body };
+                    query = "match (a:Article { id: $id}) set a.title = $title, a.body = $body, a.thumbnailUrl = $thumbnailUrl return a";
+                    let thumbnailUrl = "";
+                    if (article.thumbnailUrl) {
+                        thumbnailUrl = article.thumbnailUrl;
+                    }
+                    params = {id: article._id, title: article.title, body: article.body, thumbnailUrl: thumbnailUrl };
                     let updatedArticle = await session2.run(query, params);
                     if (updatedArticle) {
                         return true;
@@ -1318,6 +1321,7 @@ const setContentData = async (values, type, id) => {
             }
             return await session.run(query, params)
                 .then((result) => {
+                    session.close();
                     return true;
                 })
         }
@@ -1512,20 +1516,21 @@ const checkGoodResultsCeremony = (records) => {
     return false;
 }
 
-module.exports = { checkFriends: checkFriends,
-                 serveVideoRecommendations: serveVideoRecommendations,
-                 createOneVideo: createOneVideo,
-                 createOneArticle: createOneArticle,
-                 deleteOneArticle: deleteOneArticle,
-                 fetchSingleVideoData: fetchSingleVideoData,
-                 fetchSingleArticleData: fetchSingleArticleData,
-                 incrementVideoView: incrementVideoView,
-                 createOneUser: createOneUser,
-                 incrementLike: incrementLike,
-                 fetchProfilePageData: fetchProfilePageData,
-                 setFollows: setFollows,
-                 getFollows: getFollows,
-                 getChannelNotifications: getChannelNotifications,
-                 updateChannelNotifications: updateChannelNotifications,
-                 fetchContentData: fetchContentData
-                 };
+module.exports = {
+    checkFriends: checkFriends,
+    serveVideoRecommendations: serveVideoRecommendations,
+    createOneVideo: createOneVideo,
+    createOneArticle: createOneArticle,
+    deleteOneArticle: deleteOneArticle,
+    fetchSingleVideoData: fetchSingleVideoData,
+    fetchSingleArticleData: fetchSingleArticleData,
+    incrementVideoView: incrementVideoView,
+    createOneUser: createOneUser,
+    incrementLike: incrementLike,
+    fetchProfilePageData: fetchProfilePageData,
+    setFollows: setFollows,
+    getFollows: getFollows,
+    getChannelNotifications: getChannelNotifications,
+    updateChannelNotifications: updateChannelNotifications,
+    fetchContentData: fetchContentData
+};

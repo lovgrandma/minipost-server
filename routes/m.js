@@ -26,6 +26,7 @@ const processvideo = require('./processvideo.js');
 const maintenance = require('./queuemaintenance.js');
 const cloudfrontconfig = require('./servecloudfront');
 const neo = require('./neo.js');
+const recommendations = require('./recommendations.js');
 const processimage = require('./processimage.js');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
@@ -1539,6 +1540,19 @@ module.exports = function(io) {
         }
     }
 
+    const searchResults = async (req, res, next) => {
+        if (req.query) {
+            if (req.query.s) {
+                let searchResults = await recommendations.getSearchResults(req.query.s);
+                return res.json(searchResults);
+            } else {
+                return res.json(false);
+            }
+        } else {
+            return res.json(false);
+        }
+    }
+
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
         return login(req, res, next);
@@ -1555,8 +1569,8 @@ module.exports = function(io) {
     });
 
     router.get('/search', (req, res, next) => {
-        console.log(req.query);
-        return res.json(true);
+
+        return searchResults(req, res, next);
     })
 
     // FETCH CONTENT DATA

@@ -12,5 +12,10 @@ exports = module.exports = {
     },
     cdn: {
         cloudFront1: "https://XXXXXXXXXXXXXXX.cloudfront.net"
+    },
+    neo: {
+        address: "bolt://anaddress:aport",
+        username: "XXXXXXXX",
+        password: "XXXXXXXXXXXXXXX"
     }
 };
