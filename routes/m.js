@@ -38,7 +38,12 @@ module.exports = function(io) {
     const s3Cred = require('./api/s3credentials.js');
     const multer = require('multer');
     aws.config.update(s3Cred.awsConfig);
+    aws.config.apiVersions = {
+        sqs: '2012-11-05',
+        // other service API versions
+    };
     const s3 = new aws.S3();
+    const sqs = new aws.SQS();
     process.env.PUBLIC_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.public, 'utf8');
     process.env.PRIVATE_KEY = fs.readFileSync(s3Cred.cloudFrontKeysPath.private , 'utf8');
     // Credentials for cloudFront cookie signing
@@ -57,6 +62,32 @@ module.exports = function(io) {
         })
     });
 
+    let sqsQueue = "";
+    sqs.listQueues(null, function(err, data) {
+        if (err) {
+           return null // (err, err.stack) an error occurred
+        } else {
+            console.log(data);           // successful response
+            if (data.QueueUrls) {
+                for (let i = 0; i < data.QueueUrls.length; i++) {
+                    if (data.QueueUrls[i].match(/(.*video_moderation)/)) {
+                        sqsQueue = data.QueueUrls[i].match(/(.*video_moderation)/)[0];
+                    }
+                }
+            }
+        }
+    })
+    setInterval(() => {
+        if (sqsQueue) {
+            const params = {
+                QueueUrl: sqsQueue
+            }
+            sqs.receiveMessage(params, function(err, data) {
+                if (err) console.log(err, err.stack); // an error occurred
+                else     console.log(data);           // successful response
+            })
+        }
+    }, 100000);
     videoQueue.process(CPUs, async function(job, done) {
         videoQueue.on('progress', async function(progress) {
             if (progress._progress.match(/video ready/)) {
@@ -1553,6 +1584,61 @@ module.exports = function(io) {
         }
     }
 
+    const deleteOneContent = async (req, res, next) => {
+        if (req.body) {
+            if (req.body.id && req.body.type) {
+                if (req.body.type == "video") {
+                    deleteOneVideo(req, res, next);
+                } else {
+                    deleteOneArticle(req, res, next);
+                }
+            }
+        }
+    }
+
+    const deleteOneVideo = async (req, res, next) => {
+        let neoRecord = await neo.deleteOneVideo(req.body.id); // Delete record and relationships on neo4j
+        let thumbnailUrl = neoRecord.records[0]._fields[0]; // Get thumbnail name
+        let document = await Video.findOneAndDelete({ _id: req.body.id}).lean(); // Get document on mongo and delete
+        if (document) {
+            // Call aws to delete bucket files (thumbnail, audio, video, mpd)
+            let locations = [];
+            for (let i = 0; i < document.locations.length; i++) {
+                if (document.locations[i].match(/([a-zA-Z0-9].*)\/([a-zA-Z0-9].*)(\.[a-zA-Z0-9].*)/)) {
+                    locations.push({ Key: document.locations[i].match(/([a-zA-Z0-9].*)\/([a-zA-Z0-9].*)(\.[a-zA-Z0-9].*)/)[2] +
+                                   document.locations[i].match(/([a-zA-Z0-9].*)\/([a-zA-Z0-9].*)(\.[a-zA-Z0-9].*)/)[3] });
+                }
+            }
+            let params = {
+                Bucket: 'minifs',
+                Delete: {
+                    Objects: locations,
+                    Quiet: false
+                }
+            };
+            s3.deleteObjects(params, function(err, data) {
+                if (err) console.log(err, err.stack); // an error occurred
+                // successful response
+
+            });
+            let params2 = {
+                Bucket: "minifs-thumbnails",
+                Key: thumbnailUrl + ".jpeg"
+            }
+            s3.deleteObject(params2, function(err, data) {
+                if (err) console.log(err, err.stack); // an error occurred
+                // successful response
+            });
+        }
+        return res.json(true);
+    }
+
+    const deleteOneArticle = async(req, res, next) => {
+        neo.deleteOneArticle(req.body.id);
+        Article.deleteOne({ _id: uuid});
+        return res.json(true);
+    }
+
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
         return login(req, res, next);
@@ -1569,7 +1655,6 @@ module.exports = function(io) {
     });
 
     router.get('/search', (req, res, next) => {
-
         return searchResults(req, res, next);
     })
 
@@ -1676,6 +1761,10 @@ module.exports = function(io) {
     router.post('/fetchprofilepagedata', (req, res, next) => {
         return fetchProfilePageData(req, res, next);
     })
+
+    router.post('/deleteOneContent', (req, res, next) => {
+        return deleteOneContent(req, res, next);
+    });
 
     // GET a users profile
 

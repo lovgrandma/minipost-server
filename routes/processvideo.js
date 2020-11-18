@@ -26,7 +26,12 @@ const aws = require('aws-sdk');
 const s3Cred = require('./api/s3credentials.js');
 const multer = require('multer');
 aws.config.update(s3Cred.awsConfig);
+aws.config.apiVersions = {
+    rekognition: '2016-06-27'
+}
 const s3 = new aws.S3();
+const recognition = new aws.Rekognition();
+const videoMpdBucket = "minifs";
 
 // Resolutions for video conversion
 const resolutions = [2048, 1440, 1080, 720, 480, 360, 240];
@@ -277,10 +282,15 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
 const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, socket, job, delArr, originalVideo) {
     let objLocations = [];
     let mpdLoc = "";
+    let videoCheck = null;
     for (obj of s3Objects) {
         objLocations.push(obj.location);
         if (obj.location.match(/.*(mpd).*/)) {
             mpdLoc = obj.location.match(/.*(mpd).*/)[0];
+        } else if (videoCheck == null && obj.location.match(/.*(\/)([a-zA-Z0-9-].*)(mp4).*/)) {
+            if (!obj.location.match(/.*(\/)([a-zA-Z0-9-].*)(\-audio).(mp4).*/)) {
+                videoCheck = obj.location.match(/.*(\/)([a-zA-Z0-9-].*)(mp4).*/)[2] + obj.location.match(/.*(\/)([a-zA-Z0-9-].*)(mp4).*/)[3]; // Matches first video found in objLocations for profanity/porn check. Necessary as without filtering it could match audio or the mpd.
+            }
         }
     }
     let awaitingInfo = function(videoRecord) { // If title is present dont append anything past state, else append awaitinginfo
@@ -295,26 +305,67 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
         }
     }
     let videoRecord = await Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true });
+    let profanityJobId = await profanityCheck(videoCheck, generatedUuid);
     if (await videoRecord) {
         let mpd;
         if (videoRecord.mpd) mpd = videoRecord.mpd;
         let userObj = await User.findOne({ username: body.user });
-        for (let i = 0; i < userObj.videos.length; i++) {
-            if (userObj.videos[i].id == generatedUuid) {
-                // Updates user record based on whether or not video document is waiting for info (has a title) or not.
-                let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
-                if (await userVideoRecord) {
-                    // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
-                    let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
-                    neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null);
-                    neo.updateChannelNotifications(userUuid, generatedUuid, "video");
-                    deleteJob(true, job, mpd, room); // Success
-                    deleteVideoArray(delArr, originalVideo, room, 10000);
+        if (profanityJobId) {
+            for (let i = 0; i < userObj.videos.length; i++) {
+                if (userObj.videos[i].id == generatedUuid) {
+                    // Updates user record based on whether or not video document is waiting for info (has a title) or not.
+                    let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
+                    if (await userVideoRecord) {
+                        // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
+                        let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
+                        neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null);
+                        neo.updateChannelNotifications(userUuid, generatedUuid, "video");
+                        deleteJob(true, job, mpd, room); // Success
+                        deleteVideoArray(delArr, originalVideo, room, 10000);
+                    }
+                    break;
                 }
-                break;
             }
         }
     }
+}
+
+// This sends a request to amazon web services to start the content moderation service on the video uploaded to the bucket.
+const profanityCheck = async (record, generatedUuid) => {
+    const roleArnId = s3Cred.awsConfig.roleArnId;
+    const snsTopicArnId = s3Cred.awsConfig.snsTopicArnId;
+    const params = {
+        Video: {
+            S3Object: {
+                Bucket: videoMpdBucket,
+                Name: record
+            }
+        },
+        ClientRequestToken: generatedUuid,
+        JobTag: 'detectProfanityVideo',
+        NotificationChannel: {
+            SNSTopicArn: 'arn:aws:sns:us-east-2:546584803456:minifsmoderation',
+            RoleArn: 'arn:aws:iam::546584803456:role/minifsrecognitionaccess'
+        }
+    }
+    return await recognition.startContentModeration(params, function(err, data) {
+        if (err) {
+            console.log(err, err.stack); // an error occurred
+        } else {
+            console.log(data);           // successful response
+            const params2 = {
+                JobId: data.JobId
+            }
+            recognition.getContentModeration(params2, function(err, data) {
+                if (err) {
+                    console.log(err);
+                } else {
+                    console.log(data);
+                }
+            })
+        }
+        return data;
+    });
 }
 
 // Deletes originally converted videos from temporary storage (usually after they have been uploaded to an object storage) Waits for brief period of time after amazon upload to ensure files are not being used.

@@ -48,7 +48,7 @@ const buildIndex = async () => {
                 })
                 if (exists.videos == false) {
                     let session2 = driver.session();
-                    let query = "CALL db.index.fulltext.createNodeIndex(\"videos\",[\"Video\"],[\"title\", \"description\", \"author\", \"tags\", \"mpd\", \"thumbnailUrl\"])";
+                    let query = "CALL db.index.fulltext.createNodeIndex(\"videos\",[\"Video\"],[\"title\", \"description\", \"author\", \"tags\", \"mpd\", \"thumbnailUrl\", \"views\", \"publishDate\"])";
                     session2.run(query)
                         .then((result) => {
                             session2.close();
@@ -56,7 +56,7 @@ const buildIndex = async () => {
                 }
                 if (exists.articles == false) {
                     let session3 = driver.session();
-                    let query = "CALL db.index.fulltext.createNodeIndex(\"articles\",[\"Article\"],[\"title\", \"body\", \"author\", \"id\", \"thumbnailUrl\"])";
+                    let query = "CALL db.index.fulltext.createNodeIndex(\"articles\",[\"Article\"],[\"title\", \"body\", \"author\", \"id\", \"thumbnailUrl\", \"reads\", \"publishDate\"])";
                     session3.run(query)
                         .then((result) => {
                             session3.close();
@@ -93,7 +93,7 @@ const getSearchResults = async (value, append = 0, types = { video: true, articl
                 let temp = [];
                 if (types.video) {
                     session = driver.session();
-                    query = "CALL db.index.fulltext.queryNodes(\"videos\", \"" + value + "\") YIELD node, score RETURN node.title, node.description, node.author, node.tags, node.mpd, node.thumbnailUrl, score";
+                    query = "CALL db.index.fulltext.queryNodes(\"videos\", \"" + value + "\") YIELD node, score RETURN node.title, node.description, node.author, node.tags, node.mpd, node.thumbnailUrl, node.views, node.publishDate, score";
                 }
                 // Determine whether or not to get videos that match search query
                 return await runSession(types.video, session, query).then((result) => {
@@ -110,7 +110,9 @@ const getSearchResults = async (value, append = 0, types = { video: true, articl
                                         author: result.records[i]._fields[2],
                                         tags: result.records[i]._fields[3],
                                         mpd: result.records[i]._fields[4],
-                                        thumbnailurl: result.records[i]._fields[5]
+                                        thumbnailUrl: result.records[i]._fields[5],
+                                        views: parseInt(result.records[i]._fields[6]),
+                                        publishDate: result.records[i]._fields[7]
                                     }
                                     temp.push(doc);
                                 }
@@ -125,7 +127,7 @@ const getSearchResults = async (value, append = 0, types = { video: true, articl
                     let session2
                     if (types.article) {
                         session2 = driver.session();
-                        query = "CALL db.index.fulltext.queryNodes(\"articles\", \"" + value + "\") YIELD node, score RETURN node.title, node.body, node.author, node.id, node.thumbnailUrl, score";
+                        query = "CALL db.index.fulltext.queryNodes(\"articles\", \"" + value + "\") YIELD node, score RETURN node.title, node.body, node.author, node.id, node.thumbnailUrl, node.reads, node.publishDate, score";
                     }
                     // Determine whether or not to get articles that match search query
                     return await runSession(types.article, session2, query).then((result) => {
@@ -142,7 +144,9 @@ const getSearchResults = async (value, append = 0, types = { video: true, articl
                                             body: result.records[i]._fields[1],
                                             author: result.records[i]._fields[2],
                                             id: result.records[i]._fields[3],
-                                            thumbnailurl: result.records[i]._fields[4]
+                                            thumbnailUrl: result.records[i]._fields[4],
+                                            reads: parseInt(result.records[i]._fields[5]),
+                                            publishDate: result.records[i]._fields[6]
                                         }
                                         temp.push(doc);
                                     }

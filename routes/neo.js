@@ -561,7 +561,7 @@ const createOneArticle = async (article, edit = false) => {
     }
 }
 
-/* Deletes one article from database. This should almost always never be called even if user deletes profile. Only call if error creating article on mongoDb to maintain consistency */
+/* Deletes one article from database. This should not be called often, it will not be called even if user deletes profile. Only call if error creating article on mongoDb to maintain consistency. Or if user wants to delete their own article */
 const deleteOneArticle = async (id) => {
     try {
         if (id) {
@@ -578,6 +578,28 @@ const deleteOneArticle = async (id) => {
         }
         return false;
     } catch (err) {
+        return false;
+    }
+}
+
+/* Deletes one video from database. */
+const deleteOneVideo = async (mpd) => {
+    try {
+        if (mpd) {
+            if (mpd.length > 0) {
+                let session = driver.session();
+                let query = "match (a:Video { mpd: $mpd })-[r]-() WITH a, r, a.thumbnailUrl AS thumbnailUrl DELETE a, r RETURN thumbnailUrl";
+                let params = { mpd: mpd };
+                let completeDeletion = await session.run(query, params);
+                if (completeDeletion) {
+                    session.close();
+                    return completeDeletion;
+                }
+            }
+        }
+        return false;
+    } catch (err) {
+        console.log(err);
         return false;
     }
 }
@@ -1522,6 +1544,7 @@ module.exports = {
     createOneVideo: createOneVideo,
     createOneArticle: createOneArticle,
     deleteOneArticle: deleteOneArticle,
+    deleteOneVideo: deleteOneVideo,
     fetchSingleVideoData: fetchSingleVideoData,
     fetchSingleArticleData: fetchSingleArticleData,
     incrementVideoView: incrementVideoView,
