@@ -17,7 +17,8 @@ const uuidv4 = require('uuid/v4');
 const cloudfrontconfig = require('./servecloudfront');
 const s3Cred = require('./api/s3credentials.js');
 const driver = neo4j.driver(s3Cred.neo.address, neo4j.auth.basic(s3Cred.neo.username, s3Cred.neo.password));
-const utility = require('./utility');
+const contentutility = require('./contentutility.js');
+const utility = require('./utility.js');
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
@@ -72,7 +73,7 @@ const serveVideoRecommendations = async (user = "", append = []) => {
 7. "" in last 5 years
 This is a fallback method incase recommendation system cannot find enough unique high affinity videos user has not watched in 6 months
 */
-const serveRandomTrendingVideos = async (user = "") => {
+const serveRandomTrendingVideos = async (user = "", amount = 10) => {
     const session = driver.session();
     // Do not be confused by following returning 5 videos on client side. The first match will be doubled and removed when Video-RESPONSE-article query is matched
     // Avoid using skip as this may skip over documents that hold article responses
@@ -83,46 +84,12 @@ const serveRandomTrendingVideos = async (user = "") => {
         .then(async (result) => {
             if (result) {
                 let graphRecords = result.records;
-                // Remove all records with empty titles and are not published. This will remove videos that have been uploaded to db but have not yet been published by user
-                graphRecords.forEach((record, i) => {
-                    if (record._fields) {
-                        if (record._fields[0]) {
-                            if (record._fields[0].properties) {
-                                if (!record._fields[0].properties.title || !record._fields[0].properties.published) {
-                                    graphRecords.splice(i, 1);
-                                }
-                            }
-                        }
-                    }
-                })
-                graphRecords.forEach((record, i) => {
-                    graphRecords[i]._fields[0].properties.articles = [];
-                    let found = 0;
-                    for (let j = 0; j < graphRecords.length; j++) {
-                        if (record._fields[0].properties.mpd === graphRecords[j]._fields[0].properties.mpd) {
-                            found++;
-                            if (graphRecords[j]._fields[2]) {
-                                // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
-                                graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
-                                graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);
-                                graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
-                                record._fields[0].properties.articles.push(graphRecords[j]._fields[2]);
-                            }
-                            if (found > 1) {
-                                graphRecords.splice(j, 1);
-                                j--;
-                            }
-                        }
-                    }
-                    let views = 0;
-                    if (record._fields[0].properties.views) {
-                        views = record._fields[0].properties.views.toNumber();
-                    }
-                    graphRecords[i]._fields[0].properties.views = views;
-                });
+                graphRecords = contentutility.removeInvalidVideos(graphRecords); // Remove invalid record that have not been published/dont have video/profanity
+                graphRecords = contentutility.appendArticleResponses(graphRecords); // Append article responses to content
+                // To do add method to get articles and mix into amongst main page data
                 if (graphRecords) {
-                    graphRecords = utility.shuffleArray(graphRecords);
-                    graphRecords = graphRecords.slice(0, 10);
+                    graphRecords = utility.shuffleArray(graphRecords); // Do shuffle of records
+                    graphRecords = graphRecords.slice(0, amount); // Slice videos down to 10 out of potential 100.
                     return graphRecords;
                 } else {
                     return false;
@@ -606,8 +573,8 @@ const deleteOneVideo = async (mpd) => {
 
 // Sometimes there can be records with empty fields. This will ensure that errors do not occur when trying to access nonexistent data members
 const resolveEmptyData = (record, type, dataType = "string") => {
-    console.log(record, type);
-    console.log(record._fields[0].properties);
+//    console.log(record, type);
+//    console.log(record._fields[0].properties);
     let placeholder = "";
     if (dataType == "number") {
         placeholder = 0;

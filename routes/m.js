@@ -1609,18 +1609,21 @@ module.exports = function(io) {
                                    document.locations[i].match(/([a-zA-Z0-9].*)\/([a-zA-Z0-9].*)(\.[a-zA-Z0-9].*)/)[3] });
                 }
             }
-            let params = {
-                Bucket: 'minifs',
-                Delete: {
-                    Objects: locations,
-                    Quiet: false
-                }
-            };
-            s3.deleteObjects(params, function(err, data) {
-                if (err) console.log(err, err.stack); // an error occurred
-                // successful response
+            // If the document returned correctly and got locations of record data to be deleted then run deletion process on S3
+            if (locations.length > 0) {
+                let params = {
+                    Bucket: 'minifs',
+                    Delete: {
+                        Objects: locations,
+                        Quiet: false
+                    }
+                };
+                s3.deleteObjects(params, function(err, data) {
+                    if (err) console.log(err, err.stack); // an error occurred
+                    // successful response
 
-            });
+                });
+            }
             let params2 = {
                 Bucket: "minifs-thumbnails",
                 Key: thumbnailUrl + ".jpeg"
@@ -1629,14 +1632,20 @@ module.exports = function(io) {
                 if (err) console.log(err, err.stack); // an error occurred
                 // successful response
             });
+            return res.json(true);
+        } else {
+            return res.json(false);
         }
-        return res.json(true);
     }
 
     const deleteOneArticle = async(req, res, next) => {
-        neo.deleteOneArticle(req.body.id);
-        Article.deleteOne({ _id: uuid});
-        return res.json(true);
+        if (req.body.id) {
+            neo.deleteOneArticle(req.body.id);
+            Article.deleteOne({ _id: req.body.id});
+            return res.json(true);
+        } else {
+            return res.json(false);
+        }
     }
 
     // LOGIN USING CREDENTIALS
