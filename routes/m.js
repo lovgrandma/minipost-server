@@ -1601,6 +1601,8 @@ module.exports = function(io) {
         let thumbnailUrl = neoRecord.records[0]._fields[0]; // Get thumbnail name
         let document = await Video.findOneAndDelete({ _id: req.body.id}).lean(); // Get document on mongo and delete
         if (document) {
+            // Remove record copy from array on user record
+            await User.update({ username: document.author }, { $pull: { 'videos': { id: req.body.id }}});
             // Call aws to delete bucket files (thumbnail, audio, video, mpd)
             let locations = [];
             for (let i = 0; i < document.locations.length; i++) {
@@ -1641,7 +1643,10 @@ module.exports = function(io) {
     const deleteOneArticle = async(req, res, next) => {
         if (req.body.id) {
             neo.deleteOneArticle(req.body.id);
-            Article.deleteOne({ _id: req.body.id});
+            let document = await Article.findOneAndDelete({ _id: req.body.id}).lean();
+            if (document) {
+                await User.update({ username: document.author }, { $pull: { 'articles': { id: req.body.id }}});
+            }
             return res.json(true);
         } else {
             return res.json(false);
