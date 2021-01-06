@@ -305,26 +305,30 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
         }
     }
     let videoRecord = await Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true });
-    let profanityJobId = await profanityCheck(videoCheck, generatedUuid);
     if (await videoRecord) {
         let mpd;
         if (videoRecord.mpd) mpd = videoRecord.mpd;
         let userObj = await User.findOne({ username: body.user });
-        if (profanityJobId) {
-            for (let i = 0; i < userObj.videos.length; i++) {
-                if (userObj.videos[i].id == generatedUuid) {
-                    // Updates user record based on whether or not video document is waiting for info (has a title) or not.
-                    let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
-                    if (await userVideoRecord) {
-                        // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
-                        let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
-                        neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null);
-                        neo.updateChannelNotifications(userUuid, generatedUuid, "video");
-                        deleteJob(true, job, mpd, room); // Success
-                        deleteVideoArray(delArr, originalVideo, room, 10000);
-                    }
-                    break;
+        for (let i = 0; i < userObj.videos.length; i++) {
+            if (userObj.videos[i].id == generatedUuid) {
+                // Updates user record based on whether or not video document is waiting for info (has a title) or not.
+                let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
+                if (await userVideoRecord) {
+                    // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
+                    let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
+                    neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null)
+                        .then((data) => {
+                            return profanityCheck(videoCheck, generatedUuid); // Set profanity check job after record is created on neo
+                        })
+                        .then((data) => {
+                            return neo.updateChannelNotifications(userUuid, generatedUuid, "video");
+                        })
+                        .then((data) => {
+                            deleteJob(true, job, mpd, room); // Success
+                            deleteVideoArray(delArr, originalVideo, room, 10000);
+                        });
                 }
+                break;
             }
         }
     }
@@ -344,27 +348,18 @@ const profanityCheck = async (record, generatedUuid) => {
         ClientRequestToken: generatedUuid,
         JobTag: 'detectProfanityVideo',
         NotificationChannel: {
-            SNSTopicArn: 'arn:aws:sns:us-east-2:546584803456:minifsmoderation',
-            RoleArn: 'arn:aws:iam::546584803456:role/minifsrecognitionaccess'
+            SNSTopicArn: 'arn:aws:sns:us-east-2:546584803456:AmazonRekognition',
+            RoleArn: 'arn:aws:iam::546584803456:role/minifsrekognitionaccess'
         }
     }
     return await recognition.startContentModeration(params, function(err, data) {
         if (err) {
-            console.log(err, err.stack); // an error occurred
-        } else {
-            console.log(data);           // successful response
-            const params2 = {
-                JobId: data.JobId
-            }
-            recognition.getContentModeration(params2, function(err, data) {
-                if (err) {
-                    console.log(err);
-                } else {
-                    console.log(data);
-                }
-            })
+            return null;
         }
-        return data;
+        if (data) {
+            let jobId = data.JobId;
+            return neo.setProfanityCheck(generatedUuid, jobId); // Sets profanity check reference on neo object to check later for job completion
+        }
     });
 }
 

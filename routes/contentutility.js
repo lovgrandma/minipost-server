@@ -1,17 +1,65 @@
+const processprofanity = require('./processprofanity.js');
+const quarantine = require('./quarantine.js');
 // Remove all records with empty titles, are not published or have bad state(profanity found, user lost posting permissions, etc). This will remove videos that have been uploaded to db but have not yet been published/available for public
-const removeInvalidVideos = (graphRecords) => {
-    graphRecords.forEach((record, i) => {
-        if (record._fields) {
-            if (record._fields[0]) {
-                if (record._fields[0].properties) {
-                    if (!record._fields[0].properties.title || !record._fields[0].properties.published) {
-                        graphRecords.splice(i, 1);
+const removeInvalidVideos = async (graphRecords) => {
+    graphRecords = await removeBadVideos(graphRecords).then( async (graphRecords) => {
+        graphRecords.forEach((record, i) => {
+            if (record._fields) {
+                if (record._fields[0]) {
+                    if (record._fields[0].properties) {
+                        if (!record._fields[0].properties.title || !record._fields[0].properties.published) {
+                            graphRecords.splice(i, 1);
+                        }
                     }
                 }
             }
-        }
-    })
+        })
+        return graphRecords;
+    });
     return graphRecords;
+}
+
+// Removes videos with pornographic material or ones that do not return profanity filter results
+// This successfully removes pornographic videos and returns videos that are good to view. Once the video is queried once with the profanity data, it should
+// update the information on the db with a quarantine method
+const removeBadVideos = async (graphRecords) => {
+    let promises = graphRecords.map( async record => {
+        let profanityPromise = await new Promise( async (resolve, reject) => {
+            if (record._fields[0].properties.status != 'good') {
+                if (record._fields[0].properties.profanityJobId == "") {
+                    resolve({profanity: 0, status: 'waiting', jobId: ''});
+                } else if (record._fields[0].properties.status == 'bad') {
+                    resolve({profanity: 1, status: 'bad', jobId: record._fields[0].properties.profanityJobId });
+                } else if (record._fields[0].properties.status.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)) { // waiting with defer time period
+                    let profanityResult = await processprofanity.getProfanityData(record._fields[0].properties.profanityJobId, record._fields[0].properties.status);
+                    console.log(profanityResult);
+                    if (profanityResult.status == 'bad' || profanityResult.status == 'good') {
+                        quarantine.quarantineVideo(profanityResult, record._fields[0].properties.mpd);
+                    } else if (profanityResult.status == 'in_progress') {
+                        quarantine.defer(profanityResult, record._fields[0].properties.mpd, 5); // defer by 5 minutes
+                    }
+                    resolve(profanityResult);
+                }
+            } else if (record._fields[0].properties.status == 'good') {
+                resolve({profanity: 0, status: 'good', jobId: record._fields[0].properties.profanityJobId });
+            } else {
+                resolve({profanity: 0, status: 'null', jobId: record._fields[0].properties.profanityJobId });
+            }
+        })
+        if (profanityPromise.status == 'good') {
+            return record;
+        } else {
+            return null;
+        }
+    });
+    let result = await Promise.all(promises);
+    for (let i = 0; i < result.length; i++) {
+        if (result[i] == null) {
+            result.splice(i, 1);
+            i--;
+        }
+    }
+    return result;
 }
 
 // Appends appropriate article responses to respective records of content
@@ -66,5 +114,6 @@ const appendArticleResponses = (graphRecords) => {
 }
 
 module.exports = { removeInvalidVideos: removeInvalidVideos,
-                  appendArticleResponses: appendArticleResponses
+                  appendArticleResponses: appendArticleResponses,
+                  removeBadVideos: removeBadVideos
                  };

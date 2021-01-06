@@ -70,24 +70,30 @@ module.exports = function(io) {
             console.log(data);           // successful response
             if (data.QueueUrls) {
                 for (let i = 0; i < data.QueueUrls.length; i++) {
-                    if (data.QueueUrls[i].match(/(.*video_moderation)/)) {
-                        sqsQueue = data.QueueUrls[i].match(/(.*video_moderation)/)[0];
+                    if (data.QueueUrls[i].match(/(.*AmazonRekognition.*)/)) {
+                        sqsQueue = data.QueueUrls[i].match(/(.*AmazonRekognition.*)/)[0];
                     }
                 }
             }
         }
     })
-    setInterval(() => {
+    const receiveMessages = function(sqsQueue) {
+        console.log(sqsQueue);
         if (sqsQueue) {
             const params = {
-                QueueUrl: sqsQueue
+                QueueUrl: sqsQueue,
+                MaxNumberOfMessages: '10',
+                WaitTimeSeconds: 20
             }
             sqs.receiveMessage(params, function(err, data) {
                 if (err) console.log(err, err.stack); // an error occurred
                 else     console.log(data);           // successful response
             })
         }
-    }, 100000);
+    }
+    setInterval(() => {
+        receiveMessages(sqsQueue);
+    }, 2500000);
     videoQueue.process(CPUs, async function(job, done) {
         videoQueue.on('progress', async function(progress) {
             if (progress._progress.match(/video ready/)) {
@@ -100,6 +106,7 @@ module.exports = function(io) {
 
         return processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket, job);
     });
+
 
     videoQueue.on('error', function(error) {
         console.log("Video queue" + error);
@@ -178,6 +185,7 @@ module.exports = function(io) {
             let currentlyProcessing = false;
             let room = "";
             let userSocket = body.socket;
+            console.log(req.body);
             if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
                 for (video of userDbObject.videos) {
                     if (video) {
@@ -337,7 +345,7 @@ module.exports = function(io) {
                         let publishDate = new Date().toLocaleString();
                         Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
                             let userUpdated;
-                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType, serverThumbnailUrl);
+                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType, serverThumbnailUrl, null);
                             let mpd = "";
                             if (graphRecordUpdated.records) {
                                 if (graphRecordUpdated.records[0]) {
@@ -1228,10 +1236,12 @@ module.exports = function(io) {
                                 pendingVideo = true;
                                 responded = true;
                                 let tagArr = [];
-                                videoData.tags.forEach((node) => {
-                                    tagArr = tagArr.concat(node.split(","));
-                                });
-                                return res.json({ querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: tagArr  });
+                                if (videoData) {
+                                    videoData.tags.forEach((node) => {
+                                        tagArr = tagArr.concat(node.split(","));
+                                    });
+                                    return res.json({ querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: tagArr  });
+                                }
                                 break;
                             }
                         } else if (video.state.toString().match(/([0-9].*);awaitinginfo/)) {

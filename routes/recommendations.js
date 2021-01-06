@@ -22,7 +22,7 @@ const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
 
-// This function will create indexes if they do not exists once the application begins running. This function should not be running often or much at all
+// This function will create indexes if they do not exist once the application begins running. This function should not be running often or much at all
 // since the index will update itself and it does not need to be tinkered with.
 const buildIndex = async () => {
     try {

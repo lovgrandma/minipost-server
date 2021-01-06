@@ -18,6 +18,7 @@ const cloudfrontconfig = require('./servecloudfront');
 const s3Cred = require('./api/s3credentials.js');
 const driver = neo4j.driver(s3Cred.neo.address, neo4j.auth.basic(s3Cred.neo.username, s3Cred.neo.password));
 const contentutility = require('./contentutility.js');
+const processprofanity = require('./processprofanity.js');
 const utility = require('./utility.js');
 const User = require('../models/user');
 const Chat = require('../models/chat');
@@ -84,13 +85,20 @@ const serveRandomTrendingVideos = async (user = "", amount = 10) => {
         .then(async (result) => {
             if (result) {
                 let graphRecords = result.records;
-                graphRecords = contentutility.removeInvalidVideos(graphRecords); // Remove invalid record that have not been published/dont have video/profanity
-                graphRecords = contentutility.appendArticleResponses(graphRecords); // Append article responses to content
+                graphRecords = await contentutility.removeInvalidVideos(graphRecords); // Remove invalid record that have not been published/dont have video/profanity
+                console.log(graphRecords);
+                return graphRecords;
+            } else {
+                return false;
+            }
+        }).then( async (data) => {
+            if (data) {
+                data = contentutility.appendArticleResponses(data); // Append article responses to content
                 // To do add method to get articles and mix into amongst main page data
-                if (graphRecords) {
-                    graphRecords = utility.shuffleArray(graphRecords); // Do shuffle of records
-                    graphRecords = graphRecords.slice(0, amount); // Slice videos down to 10 out of potential 100.
-                    return graphRecords;
+                if (data) {
+                    data = utility.shuffleArray(data); // Do shuffle of records
+                    data = data.slice(0, amount); // Slice videos down to 10 out of potential 100.
+                    return data;
                 } else {
                     return false;
                 }
@@ -349,7 +357,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 if (!tags) {
                     tags = "";
                 }
-                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl }) return a";
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl, profanityJobId: '' }) return a";
                 let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl, videoPublished: videoPublished };
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {
@@ -373,7 +381,7 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                             }
                         }
                         return record;
-                    });
+                    })
                 return videoRecordCreated;
             } else {
                 let query = "match (a:Video { mpd: $mpd }) set a += { ";
@@ -620,7 +628,8 @@ const fetchSingleVideoData = async (mpd, user) => {
                 published: "",
                 likes: "",
                 dislikes: "",
-                views: ""
+                views: "",
+                viewable: false
             }
             // For each result records are stored in the chronological order that you return variables.
             // Here there are 4 variables. result.records[0]._fields[0] should store the original record a you are looking for
@@ -651,6 +660,13 @@ const fetchSingleVideoData = async (mpd, user) => {
                                 video.views = result.records[0]._fields[0].properties.views.toNumber();
                             } else {
                                 video.views = result.records[0]._fields[0].properties.views;
+                            }
+                            if (result.records[0]._fields[0].properties.profanityJobId) {
+                                if (result.records[0]._fields[0].properties.status == 'good') {
+                                    video.viewable = true;
+                                } else if (result.records[0]._fields[0].properties.status == 'waiting') {
+                                    video.viewable = processprofanity.getProfanityData(result.records[0]._fields[0].properties.profanityJobId);
+                                }
                             }
                             video.mpd = result.records[0]._fields[0].properties.mpd;
                             video.thumbnail = resolveEmptyData(result.records[0], "thumbnailUrl");
@@ -961,7 +977,7 @@ const updateChannelNotifications = async(channel, data, type) => {
         const appendNotificationArr = (value, data) => {
             if (value.length) {
                 if (value.length > 10) {
-                    value = value.slice(0, 10); // Slice array if too long. Start index 0, end index 10
+                    value = value.slice(0, 10); // Slice array if too long. Start index 0, end index 10. Notifications for individual account should only be 10 documents tops
                 }
                 value.map((x, i) => {
                     if (x == data) {
@@ -1373,6 +1389,14 @@ const fetchProfilePageData = async (user) => {
                                                                     data.totalviews += parseInt(record._fields[1].properties.views);
                                                                 }
                                                             }
+                                                            if (!record._fields[1].properties.title) {
+                                                                record._fields[1].properties.title = '';
+                                                            }
+                                                            if (record._fields[1].properties.status) {
+                                                                if (record._fields[1].properties.status != 'good') {
+                                                                    record._fields[1].properties.thumbnailUrl = '';
+                                                                }
+                                                            }
                                                             record._fields[1].properties.likes = parseInt(record._fields[1].properties.likes);
                                                             record._fields[1].properties.dislikes = parseInt(record._fields[1].properties.dislikes);
                                                             data.content.push(record._fields[1].properties);
@@ -1505,6 +1529,22 @@ const checkGoodResultsCeremony = (records) => {
     return false;
 }
 
+// Sets profanity check job id reference on a created record
+const setProfanityCheck = (uuid, job, status) => {
+    let session = driver.session();
+    let nodeExists = checkNodeExists(uuid, "video");
+    if (uuid && job && nodeExists && !status) {
+        let query = "match (a:Video { mpd: $uuid}) set a += { profanityJobId: $profanityJobId, status: 'waiting;0' } return a";
+        let params = { uuid: uuid, profanityJobId: job };
+        return session.run(query, params)
+            .then((record) => {
+                return record;
+            });
+    } else {
+        return null;
+    }
+}
+
 module.exports = {
     checkFriends: checkFriends,
     serveVideoRecommendations: serveVideoRecommendations,
@@ -1522,5 +1562,6 @@ module.exports = {
     getFollows: getFollows,
     getChannelNotifications: getChannelNotifications,
     updateChannelNotifications: updateChannelNotifications,
-    fetchContentData: fetchContentData
+    fetchContentData: fetchContentData,
+    setProfanityCheck: setProfanityCheck
 };
