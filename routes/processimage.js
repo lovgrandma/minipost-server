@@ -47,9 +47,11 @@ const processThumb = async (thumbFile) => {
                     return generatedUuid;
                 })
             }
+        } else {
+            return '';
         }
     } catch (err) {
-        return false;
+        return '';
     }
 }
 

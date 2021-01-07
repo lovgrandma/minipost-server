@@ -582,7 +582,6 @@ const deleteOneVideo = async (mpd) => {
 // Sometimes there can be records with empty fields. This will ensure that errors do not occur when trying to access nonexistent data members
 const resolveEmptyData = (record, type, dataType = "string") => {
 //    console.log(record, type);
-//    console.log(record._fields[0].properties);
     let placeholder = "";
     if (dataType == "number") {
         placeholder = 0;
@@ -673,6 +672,7 @@ const fetchSingleVideoData = async (mpd, user) => {
                             // Append article and video responses of this video to articleResponses data member
                             for (let i = 0; i < result.records.length; i++) { // Only iterate through 3rd field (_fields[2]). That holds cypher variable b
                                 if (result.records[i]) {
+                                    console.log(result.records[i]);
                                     if (result.records[i]._fields[2]) {
                                         if (result.records[i]._fields[2].properties) {
                                             if (result.records[i]._fields[2].labels[0] == "Article") {
@@ -681,13 +681,18 @@ const fetchSingleVideoData = async (mpd, user) => {
                                                 result.records[i]._fields[2].properties.reads = parseInt(result.records[i]._fields[2].properties.reads);
                                                 data.articleResponses.push(result.records[i]._fields[2].properties);
                                             } else if (result.records[i]._fields[2].labels[0] == "Video" && result.records[i]._fields[2].properties.mpd != video.mpd) {
-                                                result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
-                                                result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
-                                                result.records[i]._fields[2].properties.views = parseInt(result.records[i]._fields[2].properties.views);
-                                                data.videoResponses.push(result.records[i]._fields[2].properties);
+                                                if (result.records[i]._fields[2].properties.status != 'good' || !result.records[i]._fields[2].properties.status) {
+                                                    result.records[i]._fields[2] = 'null';
+                                                } else {
+                                                    result.records[i]._fields[2].properties.likes = parseInt(result.records[i]._fields[2].properties.likes);
+                                                    result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
+                                                    result.records[i]._fields[2].properties.views = parseInt(result.records[i]._fields[2].properties.views);
+                                                    data.videoResponses.push(result.records[i]._fields[2].properties);
+                                                }
                                             }
                                         }
                                     }
+                                    console.log(result.records[i]);
                                 }
                             }
                         }
