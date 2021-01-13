@@ -86,7 +86,6 @@ const serveRandomTrendingVideos = async (user = "", amount = 10) => {
             if (result) {
                 let graphRecords = result.records;
                 graphRecords = await contentutility.removeInvalidVideos(graphRecords); // Remove invalid record that have not been published/dont have video/profanity
-                console.log(graphRecords);
                 return graphRecords;
             } else {
                 return false;
@@ -233,8 +232,23 @@ const fetchContentData = async (id) => {
             let content = await session.run(query, params)
                 .then(async (result) => {
                     session.close();
-                    if (result.records[0]._fields[0].properties.title) {
-                        return result.records[0]._fields[0].properties;
+                    if (result) {
+                        if (result) {
+                            if (utility.get(result, 'records')) {
+                                if (result.records[0]) {
+                                    if (result.records[0]._fields) {
+                                        if (result.records[0]._fields[0]) {
+                                            if (result.records[0]._fields[0].properties) {
+                                                if (result.records[0]._fields[0].properties.status != 'good') {
+                                                    return null;
+                                                }
+                                                return result.records[0]._fields[0].properties;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         return null;
                     }
@@ -581,7 +595,6 @@ const deleteOneVideo = async (mpd) => {
 
 // Sometimes there can be records with empty fields. This will ensure that errors do not occur when trying to access nonexistent data members
 const resolveEmptyData = (record, type, dataType = "string") => {
-//    console.log(record, type);
     let placeholder = "";
     if (dataType == "number") {
         placeholder = 0;
@@ -787,7 +800,7 @@ const fetchSingleArticleData = async (id, user) => {
                         }
                         if (result.records[0]._fields[3]) { // Only look 4th field (_fields[3]) That holds cypher variable c. Parent document is responding to
                             if (result.records[0]._fields[3].properties) {
-                                if (result.records[0]._fields[3].labels[0] == "Video") {
+                                if (result.records[0]._fields[3].labels[0] == "Video" || result.records[0]._fields[3].labels[0] == "gVideo") {
                                     result.records[0]._fields[3].properties.likes = parseInt(result.records[0]._fields[3].properties.likes);
                                     result.records[0]._fields[3].properties.dislikes = parseInt(result.records[0]._fields[3].properties.dislikes);
                                     result.records[0]._fields[3].properties.views = parseInt(result.records[0]._fields[3].properties.views);
@@ -1349,7 +1362,14 @@ const fetchProfilePageData = async (user) => {
                 let query = "match (a:Person { name: $user }) optional match (a)-[r:PUBLISHED]-(b) return a, b";
                 let params = { user: user };
                 return await session.run(query, params)
-                    .then((result) => {
+                    .then( async (result) => {
+                        // Will check videos to see if profanity jobs are complete
+                        console.log(result.records.length);
+                        result.records = await contentutility.removeBadVideos(result.records, 1, true);
+                        console.log(result.records.length);
+                        return result;
+                    }).then( async (result) => {
+                        console.log(result);
                         let data = {
                             user: {},
                             content: [],
@@ -1381,30 +1401,35 @@ const fetchProfilePageData = async (user) => {
                                                 if (record._fields[1].labels[0]) {
                                                     record._fields[1].labels.forEach((label) => {
                                                         if (record._fields[1].properties) {
+                                                            let add = false;
                                                             if (label == "Article") {
                                                                 data.totalarticles++;
                                                                 if (record._fields[1].properties.reads) {
                                                                     record._fields[1].properties.reads = parseInt(record._fields[1].properties.reads);
                                                                     data.totalreads += parseInt(record._fields[1].properties.reads);
+                                                                    add = true;
                                                                 }
                                                             } else if (label == "Video") {
                                                                 data.totalvideos++;
                                                                 if (record._fields[1].properties.views) {
                                                                     record._fields[1].properties.views = parseInt(record._fields[1].properties.views);
                                                                     data.totalviews += parseInt(record._fields[1].properties.views);
+                                                                    add = true;
                                                                 }
                                                             }
-                                                            if (!record._fields[1].properties.title) {
-                                                                record._fields[1].properties.title = '';
-                                                            }
-                                                            if (record._fields[1].properties.status) {
-                                                                if (record._fields[1].properties.status != 'good') {
-                                                                    record._fields[1].properties.thumbnailUrl = '';
+                                                            if (add) {
+                                                                if (!record._fields[1].properties.title) {
+                                                                    record._fields[1].properties.title = '';
                                                                 }
+                                                                if (record._fields[1].properties.status) {
+                                                                    if (record._fields[1].properties.status != 'good') {
+                                                                        record._fields[1].properties.thumbnailUrl = '';
+                                                                    }
+                                                                }
+                                                                record._fields[1].properties.likes = parseInt(record._fields[1].properties.likes);
+                                                                record._fields[1].properties.dislikes = parseInt(record._fields[1].properties.dislikes);
+                                                                data.content.push(record._fields[1].properties);
                                                             }
-                                                            record._fields[1].properties.likes = parseInt(record._fields[1].properties.likes);
-                                                            record._fields[1].properties.dislikes = parseInt(record._fields[1].properties.dislikes);
-                                                            data.content.push(record._fields[1].properties);
                                                         }
                                                     })
                                                 }

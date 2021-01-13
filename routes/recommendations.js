@@ -38,7 +38,7 @@ const buildIndex = async () => {
                 result.records.forEach((record) => {
                     if (record._fields) {
                         record._fields.forEach((field) => {
-                            if (field == "videos") {
+                            if (field == "goodVideos") {
                                 exists.videos = true;
                             } else if (field == "articles") {
                                 exists.articles = true;
@@ -48,7 +48,7 @@ const buildIndex = async () => {
                 })
                 if (exists.videos == false) {
                     let session2 = driver.session();
-                    let query = "CALL db.index.fulltext.createNodeIndex(\"videos\",[\"Video\"],[\"title\", \"description\", \"author\", \"tags\", \"mpd\", \"thumbnailUrl\", \"views\", \"publishDate\"])";
+                    let query = "CALL db.index.fulltext.createNodeIndex(\"goodVideos\",[\"gVideo\"],[\"title\", \"description\", \"author\", \"tags\", \"mpd\", \"thumbnailUrl\", \"views\", \"publishDate\"])";
                     session2.run(query)
                         .then((result) => {
                             session2.close();
@@ -93,7 +93,7 @@ const getSearchResults = async (value, append = 0, types = { video: true, articl
                 let temp = [];
                 if (types.video) {
                     session = driver.session();
-                    query = "CALL db.index.fulltext.queryNodes(\"videos\", \"" + value + "\") YIELD node, score RETURN node.title, node.description, node.author, node.tags, node.mpd, node.thumbnailUrl, node.views, node.publishDate, score";
+                    query = "CALL db.index.fulltext.queryNodes(\"goodVideos\", \"" + value + "\") YIELD node, score RETURN node.title, node.description, node.author, node.tags, node.mpd, node.thumbnailUrl, node.views, node.publishDate, score";
                 }
                 // Determine whether or not to get videos that match search query
                 return await runSession(types.video, session, query).then((result) => {
@@ -174,6 +174,40 @@ const getSearchResults = async (value, append = 0, types = { video: true, articl
     }
 }
 
+const getRelatedContent = async (id, type, paginate, title) => {
+    console.log(id, type, paginate, title);
+    let content = [];
+    try {
+        // Attempt to get highest numbers of (b) videos with a:video - watched - user - watched - b:video relationship.
+        // Plain english: Return most likely videos for user to watch if they've watched this video (Related). Should function with articles too
+        return getHighestRelatedOnContent(id, type, paginate).then( async (data) => {
+            return data;
+        });
+    } catch (err) {
+        console.log(err);
+    }
+    // If result is less than 10, make a simple fulltext search using "getSearchResults" method in this file
+    
+    // Return array regardless if 0 or more. Continually update paginate to paginate content properly
+}
+
+const getHighestRelatedOnContent = async (id, type, paginate) => {
+    console.log("paginate: " + paginate);
+    let session = driver.session();
+    let query = 'match ( a:Video { mpd: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:Video) return b, count(b) as total limit $paginate';
+    if (type == 'article') {
+        query = 'match ( a:Article { id: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:Article) return b, count(b) as total limit $paginate';
+    }
+    let params = { id: id, paginate: neo4j.int(paginate) };
+    let data = await session.run(query, params);
+    for (let i = 0; i < data.records.length; i++) {
+        data.records[i]._fields[1] = neo4j.integer.toNumber(data.records[i]._fields[1]);
+        console.log(data.records[i]._fields[1]);
+    }
+    return data;
+}
+
 module.exports = {
-    getSearchResults: getSearchResults
+    getSearchResults: getSearchResults,
+    getRelatedContent: getRelatedContent
 }

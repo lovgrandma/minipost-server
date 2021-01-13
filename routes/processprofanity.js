@@ -63,9 +63,9 @@ const getProfanityData = async (jobId, status) => {
             } else {
                 let pornographic = [];
                 for (let i = 0; i < data.ModerationLabels.length; i++) {
-                    if (badLabels.indexOf(data.ModerationLabels[i].ModerationLabel.Name) >= 0 && data.ModerationLabels[i].ModerationLabel.Confidence > 80) {
+                    if (badLabels.indexOf(data.ModerationLabels[i].ModerationLabel.Name) >= 0 && data.ModerationLabels[i].ModerationLabel.Confidence > 85) {
                         pornographic.push(data.ModerationLabels[i].ModerationLabel.Name);
-                    } else if (badLabels.indexOf(data.ModerationLabels[i].ModerationLabel.ParentName) >= 0 && data.ModerationLabels[i].ModerationLabel.Confidence > 80) {
+                    } else if (badLabels.indexOf(data.ModerationLabels[i].ModerationLabel.ParentName) >= 0 && data.ModerationLabels[i].ModerationLabel.Confidence > 85) {
                         pornographic.push(data.ModerationLabels[i].ModerationLabel.ParentName);
                     }
                 }

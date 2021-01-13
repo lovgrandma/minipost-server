@@ -22,28 +22,33 @@ const removeInvalidVideos = async (graphRecords) => {
 // Removes videos with pornographic material or ones that do not return profanity filter results
 // This successfully removes pornographic videos and returns videos that are good to view. Once the video is queried once with the profanity data, it should
 // update the information on the db with a quarantine method
-const removeBadVideos = async (graphRecords) => {
+const removeBadVideos = async (graphRecords, field = 0) => {
     let promises = graphRecords.map( async record => {
         let profanityPromise = await new Promise( async (resolve, reject) => {
-            if (record._fields[0].properties.status != 'good') {
-                if (record._fields[0].properties.profanityJobId == "") {
+            if (record._fields[field].properties.id) { // is type article, good (for now)
+                resolve({profanity: 0, status: 'good', jobId: record._fields[field].properties.profanityJobId });
+            }
+            if (!record._fields[field].properties.status) {
+                resolve({profanity: 1, status: 'bad', jobId: record._fields[field].properties.profanityJobId });
+            } else if (record._fields[field].properties.status != 'good') {
+                if (record._fields[field].properties.profanityJobId == "") {
                     resolve({profanity: 0, status: 'waiting', jobId: ''});
-                } else if (record._fields[0].properties.status == 'bad') {
-                    resolve({profanity: 1, status: 'bad', jobId: record._fields[0].properties.profanityJobId });
-                } else if (record._fields[0].properties.status.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)) { // waiting with defer time period
-                    let profanityResult = await processprofanity.getProfanityData(record._fields[0].properties.profanityJobId, record._fields[0].properties.status);
+                } else if (record._fields[field].properties.status == 'bad') {
+                    resolve({profanity: 1, status: 'bad', jobId: record._fields[field].properties.profanityJobId });
+                } else if (record._fields[field].properties.status.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)) { // waiting with defer time period
+                    let profanityResult = await processprofanity.getProfanityData(record._fields[field].properties.profanityJobId, record._fields[field].properties.status);
                     console.log(profanityResult);
                     if (profanityResult.status == 'bad' || profanityResult.status == 'good') {
-                        quarantine.quarantineVideo(profanityResult, record._fields[0].properties.mpd);
+                        quarantine.quarantineVideo(profanityResult, record._fields[field].properties.mpd);
                     } else if (profanityResult.status == 'in_progress') {
-                        quarantine.defer(profanityResult, record._fields[0].properties.mpd, 5); // defer by 5 minutes
+                        quarantine.defer(profanityResult, record._fields[field].properties.mpd, 5); // defer by 5 minutes
                     }
                     resolve(profanityResult);
                 }
-            } else if (record._fields[0].properties.status == 'good') {
-                resolve({profanity: 0, status: 'good', jobId: record._fields[0].properties.profanityJobId });
+            } else if (record._fields[field].properties.status == 'good') {
+                resolve({profanity: 0, status: 'good', jobId: record._fields[field].properties.profanityJobId });
             } else {
-                resolve({profanity: 0, status: 'null', jobId: record._fields[0].properties.profanityJobId });
+                resolve({profanity: 0, status: 'null', jobId: record._fields[field].properties.profanityJobId });
             }
         })
         if (profanityPromise.status == 'good') {

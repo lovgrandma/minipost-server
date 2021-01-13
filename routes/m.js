@@ -35,6 +35,7 @@ maintenance.queueMaintenance(videoQueue);
 module.exports = function(io) {
     /* File upload functionality */
     const aws = require('aws-sdk');
+    const rekognition = new aws.Rekognition();
     const s3Cred = require('./api/s3credentials.js');
     const multer = require('multer');
     aws.config.update(s3Cred.awsConfig);
@@ -52,6 +53,20 @@ module.exports = function(io) {
         process.env.PRIVATE_KEY
     );
 
+//    let modparam = {
+//        JobId: 'e20685dd74bbb42f1fb84c229a211e252b8731ae0ac09de171036deb228a34e1'
+//    }
+//    rekognition.getContentModeration(modparam, async (err, data) => {
+//        if (!err) {
+//            if (data) {
+//                if (data.ModerationLabels) {
+//                    data.ModerationLabels.forEach((label) => {
+//                        console.log(label);
+//                    })
+//                }
+//            }
+//        } 
+//    });
     /* Uploads single video or image or file to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
         storage: multer.diskStorage({
@@ -1530,13 +1545,14 @@ module.exports = function(io) {
                 if (req.body.data) {
                     let promise = await req.body.data.map(id => {
                         return new Promise( async (resolve, reject) => {
-                            return resolve(neo.fetchContentData(id));
+                            resolve(await neo.fetchContentData(id));
                         })
                     });
                     let data = await Promise.all(promise);
                     for (let i = 0; i < data.length; i++) {
-                        if (data[i] == null) {
+                        if (data[i] == null || data[i] == undefined) {
                             data.splice(i, 1);
+                            i--;
                         }
                     }
                     return res.json(data);
@@ -1662,6 +1678,23 @@ module.exports = function(io) {
             return res.json(false);
         }
     }
+    
+    const getRelated = async(req, res, next) => {
+        if (req.body) {
+            let title = '';
+            if (req.body.title) {
+                title = req.body.title;
+            }
+            if (req.body.id && req.body.type && req.body.paginate) {
+                let content = await recommendations.getRelatedContent(req.body.id, req.body.type, req.body.paginate, title);
+                return res.json(content);
+            } else {
+                return res.json(false);
+            }
+        } else {
+            return res.json(false);
+        }
+    }
 
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
@@ -1755,7 +1788,7 @@ module.exports = function(io) {
     // PUBLISH SINGLE ARTICLE TO MONGO AND NEO4J
     router.post('/publisharticle', (req, res, next) => {
         return publishArticle(req, res, next);
-    })
+    });
 
     // GETS CLOUDFRONT URL FOR SINGLE VIDEO
     router.post('/fetchCloudfrontUrl', (req, res, next) => {
@@ -1770,7 +1803,7 @@ module.exports = function(io) {
     // GETS PAGE DATA FOR SINGLE ARTICLE PAGE
     router.post('/fetcharticlepagedata', (req, res, next) => {
         return fetchArticlePageData(req, res, next);
-    })
+    });
 
     // INCREMENT VIDEO VIEW BY 1
     router.post('/incrementview', (req, res, next) => {
@@ -1784,12 +1817,16 @@ module.exports = function(io) {
 
     router.post('/fetchprofilepagedata', (req, res, next) => {
         return fetchProfilePageData(req, res, next);
-    })
+    });
 
     router.post('/deleteOneContent', (req, res, next) => {
         return deleteOneContent(req, res, next);
     });
-
+    
+    router.post('/getRelated', (req, res, next) => {
+        return getRelated(req, res, next);
+    });
+    
     // GET a users profile
 
     return router;
