@@ -10,7 +10,7 @@ const sqs = new aws.SQS();
 const rekognition = new aws.Rekognition();
 let sqsQueue = s3Cred.awsConfig.sqsQueue;
 
-const badLabels = ['Sexual Activity', 'Explicit Nudity', 'Nudity'];
+const badLabels = ['Sexual Activity', 'Explicit Nudity', 'Nudity', 'Graphic Male Nudity', 'Graphic Female Nudity'];
 // 85% on explicit nudity as cut off for content
 const getProfanityData = async (jobId, status) => {
     try {
@@ -40,7 +40,6 @@ const getProfanityData = async (jobId, status) => {
             }
         });
         console.log(data);
-        //console.log(data.ModerationLabels);
         if (data) {
             if (data == 'wait') {
                 return {
@@ -89,9 +88,8 @@ const getProfanityData = async (jobId, status) => {
     }
 }
 
-const consumeData = async () => {
 
-}
 module.exports = {
-    getProfanityData: getProfanityData
+    getProfanityData: getProfanityData,
+    badLabels: badLabels
 }

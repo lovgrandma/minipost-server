@@ -28,6 +28,8 @@ const cloudfrontconfig = require('./servecloudfront');
 const neo = require('./neo.js');
 const recommendations = require('./recommendations.js');
 const processimage = require('./processimage.js');
+const { badLabels } = require('./processprofanity.js');
+const { deleteOne } = require('./utility.js');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 maintenance.queueMaintenance(videoQueue);
@@ -661,6 +663,7 @@ module.exports = function(io) {
                     }
                 ],
                 videos: [],
+                avatarurl: '',
                 chats: [
                     {
                         confirmed: [
@@ -1283,7 +1286,11 @@ module.exports = function(io) {
     req.body.mpdString | String of mpd requiring full cloudfront address
     */
     const fetchCloudfrontUrl = (req, res, next) => {
-        return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(req.body.rawMpd) });
+        if (req.body.rawMpd) {
+            return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(req.body.rawMpd) });
+        } else {
+            return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl() });
+        }
     }
 
     // Fetches page data for single video page
@@ -1308,7 +1315,18 @@ module.exports = function(io) {
                 if (err) throw err;
                 if (result) {
                     if (result.friends) {
-                        data.userfriendslist = result.friends[0].confirmed;
+                        let users = result.friends[0].confirmed.map(user => user.username);
+                        console.log(users);
+                        let userfriends = await User.find( 
+                            { username: {
+                                $in: users
+                            }}, {username: 1, avatarurl: 1}
+                        ).lean();
+                        if (userfriends) {
+                            data.userfriendslist = userfriends;
+                        } else {
+                            data.userfriendslist = result.friends[0].confirmed;
+                        }
                     }
                     req.body.getconversations = true;
                     data.conversations = await getconversationlogs(req, res, next);
@@ -1591,8 +1609,20 @@ module.exports = function(io) {
 
     const fetchProfilePageData = async (req, res, next) => {
         try {
-            return res.json(await neo.fetchProfilePageData(req.body.user));
+            return res.json(await neo.fetchProfilePageData(req.body.user, req.body.self));
         } catch (err) {
+            return res.json(false);
+        }
+    }
+    
+    const fetchProfileOptionsData = async (req, res, next) => {
+        try {
+            if (req.body.user) {
+                return res.json(await neo.fetchOneUser(req.body.user));
+            } else {
+                return res.json(false);
+            }
+        } catch(err) {
             return res.json(false);
         }
     }
@@ -1695,6 +1725,61 @@ module.exports = function(io) {
             return res.json(false);
         }
     }
+    
+    const uploadThumbnail = async(req, res, next) => {
+        console.log(req.file);
+        try {
+            if (req.body.extension && req.body.user && req.file) {
+                if (req.file.path) {
+                    let ext = req.body.extension;
+                    let user = req.body.user;
+                    let thumbnailLocal = req.file.path;
+                    let profanityResults = await processimage.detectProfanityOnImg(thumbnailLocal);
+                    console.log(profanityResults);
+                    let bad = false;
+                    if (profanityResults == 'err') {
+                        return res.json('err');
+                    } else if (profanityResults.ModerationLabels) {
+                        for (let i = 0; i < profanityResults.ModerationLabels.length; i++) {
+                            if (badLabels.indexOf(profanityResults.ModerationLabels[i].Name) >= 0 && profanityResults.ModerationLabels[i].Confidence > 85) {
+                                bad = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (bad) {
+                        deleteOne(thumbnailLocal);
+                        return res.json('bad');
+                    } else {
+                        // upload to s3 and set db 
+                        let process = await processimage.uploadAvatarAndUpdateRecord(user, thumbnailLocal)
+                            .then( async (data) => {
+                                if (data.avatarurl) {
+                                    let updateMongoUser = await User.findOneAndUpdate({ username: user}, { avatarurl: data.avatarurl }, { new: true }).lean();
+                                    if (updateMongoUser) {
+                                        console.log(updateMongoUser);
+                                        return data;
+                                    } else {
+                                        return 'err';
+                                    }
+                                } else {
+                                    return 'err';
+                                }
+                            });
+                        if (process) {
+                            return res.json(process);
+                        } else {
+                            return res.json('err');
+                        }
+                    }
+                }
+            } else {
+                return res.json('err');
+            }
+        } catch (err) {
+            return res.json(err);
+        }
+    }
 
     // LOGIN USING CREDENTIALS
     router.post('/login', (req, res, next) => {
@@ -1719,7 +1804,7 @@ module.exports = function(io) {
     router.post('/fetchcontentdata', (req, res, next) => {
         return fetchContentData(req, res, next);
     })
-
+   
     // SEARCH / GET USERS THAT MATCH THIS QUERY.
     router.post('/searchusers', (req, res, next) => {
         return searchusers(req, res, next);
@@ -1818,6 +1903,10 @@ module.exports = function(io) {
     router.post('/fetchprofilepagedata', (req, res, next) => {
         return fetchProfilePageData(req, res, next);
     });
+    
+    router.post('/fetchprofileoptionsdata', (req, res, next) => {
+        return fetchProfileOptionsData(req, res, next);
+    })
 
     router.post('/deleteOneContent', (req, res, next) => {
         return deleteOneContent(req, res, next);
@@ -1826,6 +1915,14 @@ module.exports = function(io) {
     router.post('/getRelated', (req, res, next) => {
         return getRelated(req, res, next);
     });
+    
+    router.post('/uploadthumbnail', uploadCheck.single('thumbnail'), (req, res, next) => {
+        return uploadThumbnail(req, res, next); 
+    });
+    
+    router.post('/fetchcloudfronturl', (req, res, next) => {
+        return fetchCloudfrontUrl(req, res, next);
+    })
     
     // GET a users profile
 

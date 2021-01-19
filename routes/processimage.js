@@ -2,9 +2,11 @@
 
 const fs = require('fs');
 const uuidv4 = require('uuid/v4');
+const neo = require('./neo.js');
 const { deleteOne } = require('./utility');
 // file upload
 const aws = require('aws-sdk');
+const rekognition = new aws.Rekognition();
 const s3Cred = require('./api/s3credentials.js');
 const multer = require('multer');
 aws.config.update(s3Cred.awsConfig);
@@ -21,7 +23,8 @@ async function doImgDeletion(thumbFile) {
 
 // Generates a unique uuid for a thumbnail file and uploads said file to s3 if no existing object with same uuid (try 3 times) was found
 // Return uuid of thumbnail
-const processThumb = async (thumbFile) => {
+// Manipulate to be used for either video thumbnail or avatar
+const processThumb = async (thumbFile, type = 'video') => {
     try {
         let i = 0;
         let checkExistingObject = null;
@@ -55,4 +58,69 @@ const processThumb = async (thumbFile) => {
     }
 }
 
-module.exports = { processThumb: processThumb };
+let detectProfanityOnImg = async (path) => {
+    let createBuffer = new Promise( async (resolve, reject) => {
+        fs.readFile(path, (err, data) => {
+            if (err) {
+                deleteOne(path);
+                reject('err');
+            }
+            let str  = data.toString('base64');
+            resolve(Buffer.from(str, 'base64'));
+        });
+    });
+
+    let getLabels = (data) => {
+        try {
+            return new Promise( async (resolve, reject) => {
+                let params = {
+                    Image: {
+                        Bytes: data
+                    }
+                }
+                rekognition.detectModerationLabels(params, function(err, data) {
+                    if (err) {
+                        deleteOne(path);
+                        reject('err');
+                    }
+                    resolve(data);
+                })
+            })
+        } catch (err) {
+            deleteOne(path);
+            return 'err';
+        }
+    };
+    return await createBuffer.then((data) => {
+        return getLabels(data);
+    })
+    .catch((err) => {
+        deleteOne(path);
+        return 'err';
+    })
+}
+
+// Uploads avatar to s3 and updates user record on dbs
+const uploadAvatarAndUpdateRecord = async (user, path) => {
+    try {
+        let uploadData;
+        let data = fs.createReadStream(path);
+        uploadData = await s3.upload({ Bucket: 'minifs-avatar', Key: "av/" + path.match(/[a-z].*[\\\/]([a-z0-9].*)/)[1], Body: data }).promise();
+        if (uploadData) { // Wait for data to be uploaded to S3
+            let data = await neo.setUserThumbnail(user, uploadData.Location.match(/[a-z].*[\\\/]([a-z0-9].*)/)[1]);
+            if (data) {
+                doImgDeletion(path);
+                return data;
+            } else {
+                doImgDeletion(path);
+                return false;
+            }
+        }
+    } catch (err) {
+        console.log(err);
+    }
+}
+
+module.exports = { processThumb: processThumb,
+                 detectProfanityOnImg: detectProfanityOnImg,
+                 uploadAvatarAndUpdateRecord: uploadAvatarAndUpdateRecord };

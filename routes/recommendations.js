@@ -192,9 +192,8 @@ const getRelatedContent = async (id, type, paginate, title) => {
 }
 
 const getHighestRelatedOnContent = async (id, type, paginate) => {
-    console.log("paginate: " + paginate);
     let session = driver.session();
-    let query = 'match ( a:Video { mpd: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:Video) return b, count(b) as total limit $paginate';
+    let query = 'match ( a:Video { mpd: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:gVideo) return b, count(b) as total limit $paginate';
     if (type == 'article') {
         query = 'match ( a:Article { id: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:Article) return b, count(b) as total limit $paginate';
     }

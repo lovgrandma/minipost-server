@@ -23,6 +23,8 @@ const utility = require('./utility.js');
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
+const aws = require('aws-sdk');
+const s3 = new aws.S3();
 
 /* Serves video recommendations to client
 Serving video recommendations based on similar people and friends requires for friends of a user to be accurately represented in the database. Running checkFriends before running any recommendation logic ensures that users friends are updated in the database
@@ -31,35 +33,38 @@ This method should return up to 20 video objects (mpds, titles, authors, descrip
 */
 const serveVideoRecommendations = async (user = "", append = []) => {
     let videoArray = [];
+    let originalLength = append.length;
     if (user) {
-        if (user.length > 0) {
-            videoArray = checkFriends(user).then((result) => {
-                return true;
-            })
-            .then( async (result) => {
-                let originalLength = append.length;
-                // If the length of the existing set of videos is greater than 0 then append and remove duplicates
-                // This function should incrementally get best videos using a loop until the length has reached a certain threshold.
-                // E.g get best recommended videos up to 15 and then return. E.g get 3 best recommended videos uploaded in last 24 hours, if only 2, go next and get best recommended videos in last week up to 4, returns 4. Return best in last month up to 3, returns 3. Get best in 6 months up to 3 returns 3. Get best in last year, returns 3. Total of 15 videos, remove duplicates, return all.
-                // Best would simply mean provided the videos this user has watched recently, return videos of similarity (similarity being:
-                // get watched videos of other users that have watched this same video by highest aggreggated watch count )
-                // so pass user, watched or unwatched filter to determine if to return watched videos, possibly a history maybe
+        videoArray = checkFriends(user).then((result) => {
+            return true;
+        })
+        .then( async (result) => {
+            // If the length of the existing set of videos is greater than 0 then append and remove duplicates
+            // This function should incrementally get best videos using a loop until the length has reached a certain threshold.
+            // E.g get best recommended videos up to 15 and then return. E.g get 3 best recommended videos uploaded in last 24 hours, if only 2, go next and get best recommended videos in last week up to 4, returns 4. Return best in last month up to 3, returns 3. Get best in 6 months up to 3 returns 3. Get best in last year, returns 3. Total of 15 videos, remove duplicates, return all.
+            // Best would simply mean provided the videos this user has watched recently, return videos of similarity (similarity being:
+            // get watched videos of other users that have watched this same video by highest aggreggated watch count )
+            // so pass user, watched or unwatched filter to determine if to return watched videos, possibly a history maybe
+            if (append.length > 0) {
+                append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
                 if (append.length > 0) {
-                    append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
-                    if (append.length > 0) {
-                        append = append.slice(originalLength, append.length);
-                    }
-                    return append;
+                    append = append.slice(originalLength, append.length);
                 }
-                // Else return first set of videos
-                return await serveRandomTrendingVideos(user);
-            });
-        } else {
-            // if we cannot get a username from the request then we will have to return random trneding videos
-            videoArray = await serveRandomTrendingVideos();
-        }
+                return append;
+            }
+            // Else return first set of videos
+            return await serveRandomTrendingVideos(user);
+        })
+        .catch((err) => {
+            console.log(err);
+        })
     } else {
-        videoArray = await serveRandomTrendingVideos();
+        // if we cannot get a username from the request then we will have to return random trending videos
+        append = await removeDuplicates(append.concat(await serveRandomTrendingVideos()), "video");
+        if (append.length > 0) {
+            append = append.slice(originalLength, append.length);
+        }
+        return append;
     }
     return videoArray;
 }
@@ -79,7 +84,7 @@ const serveRandomTrendingVideos = async (user = "", amount = 10) => {
     // Do not be confused by following returning 5 videos on client side. The first match will be doubled and removed when Video-RESPONSE-article query is matched
     // Avoid using skip as this may skip over documents that hold article responses
     let skip = Math.floor(Math.random() * 5);
-    let query = "match (a:Video) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b ORDER BY a.views DESC LIMIT 100";
+    let query = "match (a:Video)-[:PUBLISHED]-(c:Person) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b, c.avatarurl ORDER BY a.views DESC LIMIT 100";
     //let params = { skip: neo4j.int(skip) };
     let getHighestTrending = await session.run(query)
         .then(async (result) => {
@@ -309,7 +314,7 @@ const checkNodeExists = async (id, type = "video") => {
 /* Add one user to graph database */
 const createOneUser = async (user, id) => {
     session = driver.session();
-    query = "create (a:Person {name: $username, id: $id }) return a";
+    query = "create (a:Person {name: $username, id: $id, avatarurl: '' }) return a";
     const userCreated = session.run(query, { username: user, id: id })
         .then(async(result) => {
             session.close();
@@ -619,7 +624,7 @@ const resolveEmptyData = (record, type, dataType = "string") => {
 const fetchSingleVideoData = async (mpd, user) => {
     let session = driver.session();
     // Must query for original video and potential relational matches to articles. Not either/or or else query will not function properly
-    let query = "match (a:Video {mpd: $mpd}) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c";
+    let query = "match (a:Video {mpd: $mpd})-[:PUBLISHED]-(d:Person) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c, d";
     let params = { mpd: mpd };
     let data = {
         video: {},
@@ -641,7 +646,8 @@ const fetchSingleVideoData = async (mpd, user) => {
                 likes: "",
                 dislikes: "",
                 views: "",
-                viewable: false
+                viewable: false,
+                avatarurl: ""
             }
             // For each result records are stored in the chronological order that you return variables.
             // Here there are 4 variables. result.records[0]._fields[0] should store the original record a you are looking for
@@ -705,7 +711,6 @@ const fetchSingleVideoData = async (mpd, user) => {
                                             }
                                         }
                                     }
-                                    console.log(result.records[i]);
                                 }
                             }
                         }
@@ -723,6 +728,13 @@ const fetchSingleVideoData = async (mpd, user) => {
                                     result.records[0]._fields[3].properties.reads = parseInt(result.records[0]._fields[3].properties.reads);
                                     result.records[0]._fields[3].properties.type = "article";
                                     data.responseTo = result.records[0]._fields[3].properties;
+                                }
+                            }
+                        }
+                        if (result.records[0]._fields[4]) {
+                            if (result.records[0]._fields[4].properties) {
+                                if (result.records[0]._fields[4].properties.avatarurl) {
+                                    video.avatarurl = result.records[0]._fields[4].properties.avatarurl;
                                 }
                             }
                         }
@@ -1354,7 +1366,7 @@ const setContentData = async (values, type, id) => {
 }
 
 // Fetches data for single profile page
-const fetchProfilePageData = async (user) => {
+const fetchProfilePageData = async (user, self) => {
     try {
         if (user) {
             if (user.length > 0) {
@@ -1364,12 +1376,9 @@ const fetchProfilePageData = async (user) => {
                 return await session.run(query, params)
                     .then( async (result) => {
                         // Will check videos to see if profanity jobs are complete
-                        console.log(result.records.length);
-                        result.records = await contentutility.removeBadVideos(result.records, 1, true);
-                        console.log(result.records.length);
+                        result.records = await contentutility.removeBadVideos(result.records, 1, self);
                         return result;
                     }).then( async (result) => {
-                        console.log(result);
                         let data = {
                             user: {},
                             content: [],
@@ -1390,6 +1399,9 @@ const fetchProfilePageData = async (user) => {
                                         if (result.records[0]._fields[0].properties) {
                                             userObject.username = result.records[0]._fields[0].properties.name;
                                             userObject.id = result.records[0]._fields[0].properties.id;
+                                            if (result.records[0]._fields[0].properties.avatarurl) {
+                                                userObject.avatarurl = result.records[0]._fields[0].properties.avatarurl;
+                                            }
                                         }
                                     }
                                 }
@@ -1575,6 +1587,110 @@ const setProfanityCheck = (uuid, job, status) => {
     }
 }
 
+// Return type can be the record or false
+const setUserThumbnail = async (user, location) => {
+    if (user) {
+        let session = driver.session();
+        let userExists = await checkUserExists(user);
+        if (location && userExists) {
+            let query = "match (a:Person { name: $user }) with a, a {.*} as snapshot set a.avatarurl = $location return a, snapshot";
+            let params = { user: user, location: location };
+            return session.run(query, params)
+                .then( async (record) => {
+                    if (record.records) {
+                        if (record.records[0]) {
+                            if (record.records[0]._fields) {
+                                if (record.records[0]._fields[1]) {
+                                    if (record.records[0]._fields[1].avatarurl) { // Should be the snapshot of the user old before avatar updated. Delete old avatar img from s3.
+                                        let data = await deleteFromS3("av/" + record.records[0]._fields[1].avatarurl, "minifs-avatar");
+                                        if (data && record.records[0]._fields[0]) {
+                                            if (record.records[0]._fields[0].properties) {
+                                                return record.records[0]._fields[0].properties;
+                                            }
+                                            return record;
+                                        } else {
+                                            return record;
+                                        }
+                                    } else {
+                                        if (record.records[0]._fields[0]) {
+                                            if (record.records[0]._fields[0].properties) {
+                                                return record.records[0]._fields[0].properties;
+                                            }
+                                        }
+                                        return record;
+                                    }
+                                } else {
+                                    return record;
+                                }
+                            } else {
+                                return record;
+                            }
+                        } else {
+                            return record;
+                        }
+                    } else {
+                        return record;
+                    }
+                })
+                .then((record) => {
+                    return record;
+                })
+                .catch((err) => {
+                    return false;
+                })
+        } else {
+            return false;
+        }
+    } else {
+        return false;
+    }
+}
+
+const deleteFromS3 = async (key, bucket) => {
+    let params = {
+        Bucket: bucket,
+        Key: key
+    };
+    let promise = new Promise((resolve, reject) => {
+        s3.deleteObject(params, function(err, data) {
+            if (err) {
+                reject('error deleting s3 object');
+            } else {
+                resolve('deleted s3 object successfully');
+            }                 
+        });            
+    });
+    return promise;
+}
+
+const fetchOneUser = async (user) => {
+    if (user) {
+        let session = driver.session();
+        let query = "match (a:Person { name: $user }) return a";
+        let params = { user: user };
+        return session.run(query, params)
+            .then((result) => {
+                if (result.records) {
+                    if (result.records[0]) {
+                        if (result.records[0]._fields) {
+                            if (result.records[0]._fields[0]) {
+                                if (result.records[0]._fields[0].properties) {
+                                    return result.records[0]._fields[0].properties;
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            })
+            .catch((err) => {
+                return false;
+            })
+    } else {
+        return false;
+    }
+}
+
 module.exports = {
     checkFriends: checkFriends,
     serveVideoRecommendations: serveVideoRecommendations,
@@ -1586,6 +1702,7 @@ module.exports = {
     fetchSingleArticleData: fetchSingleArticleData,
     incrementVideoView: incrementVideoView,
     createOneUser: createOneUser,
+    fetchOneUser: fetchOneUser,
     incrementLike: incrementLike,
     fetchProfilePageData: fetchProfilePageData,
     setFollows: setFollows,
@@ -1593,5 +1710,6 @@ module.exports = {
     getChannelNotifications: getChannelNotifications,
     updateChannelNotifications: updateChannelNotifications,
     fetchContentData: fetchContentData,
-    setProfanityCheck: setProfanityCheck
+    setProfanityCheck: setProfanityCheck,
+    setUserThumbnail: setUserThumbnail
 };
