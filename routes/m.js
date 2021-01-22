@@ -1586,8 +1586,18 @@ module.exports = function(io) {
     /** Increments view of single video */
     const incrementView = async (req, res, next) => {
         if (req.body.mpd) {
-            let viewRecorded = await neo.incrementVideoView(req.body.mpd, req.body.user);
+            let viewRecorded = await neo.incrementContentViewRead(req.body.mpd, req.body.user, "video");
             if (viewRecorded) {
+                return res.json(true);
+            }
+        }
+        return res.json(false);
+    }
+    
+    const incrementRead = async (req, res, next) => {
+        if (req.body.id) {
+            let readRecorded = await neo.incrementContentViewRead(req.body.id, req.body.user, "article");
+            if (readRecorded) {
                 return res.json(true);
             }
         }
@@ -1894,6 +1904,10 @@ module.exports = function(io) {
     router.post('/incrementview', (req, res, next) => {
         return incrementView(req, res, next);
     });
+    
+    router.post('/incrementread', (req, res, next) => {
+        return incrementRead(req, res, next);
+    })
 
     // INCREMENT OR DECREMENT LIKE OR DISLIKE
     router.post('/likedislike', (req, res, next) => {

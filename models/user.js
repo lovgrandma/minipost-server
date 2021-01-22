@@ -46,7 +46,7 @@ const UserSchema = new mongoose.Schema({
     },
     avatarurl: {
         type: String,
-        required: true
+        required: false,
     },
     chats: {
         type: Array,

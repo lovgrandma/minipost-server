@@ -74,7 +74,7 @@ const removeBadVideos = async (graphRecords, field = 0, profile) => {
     return result;
 }
 
-// Appends appropriate article responses to respective records of content
+// Appends appropriate article responses to respective records of content. Should work with either articles or videos
 const appendArticleResponses = (graphRecords) => {
     try {
         graphRecords.forEach((record, i) => {

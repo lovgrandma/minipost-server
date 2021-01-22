@@ -10,9 +10,6 @@ const quarantineVideo = async (profanityJob, uuid) => {
     let status = profanityJob.status;
     if (uuid) {
         let query = "match (a:Video { mpd: $uuid}) set a += { status: $status } return a";
-        if (status == "bad") {
-            query = "match (a:Video { mpd: $uuid}) set a += { status: $status, nudity: true } return a";
-        }
         let params = { uuid: uuid, status: status };
         return session.run(query, params)
             .then((record) => {

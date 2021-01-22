@@ -46,7 +46,8 @@ const serveVideoRecommendations = async (user = "", append = []) => {
             // get watched videos of other users that have watched this same video by highest aggreggated watch count )
             // so pass user, watched or unwatched filter to determine if to return watched videos, possibly a history maybe
             if (append.length > 0) {
-                append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)), "video");
+                append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)));
+                console.log(append.length);
                 if (append.length > 0) {
                     append = append.slice(originalLength, append.length);
                 }
@@ -60,7 +61,7 @@ const serveVideoRecommendations = async (user = "", append = []) => {
         })
     } else {
         // if we cannot get a username from the request then we will have to return random trending videos
-        append = await removeDuplicates(append.concat(await serveRandomTrendingVideos()), "video");
+        append = await removeDuplicates(append.concat(await serveRandomTrendingVideos()));
         if (append.length > 0) {
             append = append.slice(originalLength, append.length);
         }
@@ -81,17 +82,30 @@ This is a fallback method incase recommendation system cannot find enough unique
 */
 const serveRandomTrendingVideos = async (user = "", amount = 10) => {
     const session = driver.session();
+    const session2 = driver.session();
     // Do not be confused by following returning 5 videos on client side. The first match will be doubled and removed when Video-RESPONSE-article query is matched
     // Avoid using skip as this may skip over documents that hold article responses
     let skip = Math.floor(Math.random() * 5);
+    // Why search for videos when gVideos are the only videos that are quarantined to be displayed?
+    // We search for all for now because this is what initiates the request to amazon to check if video profanity results are complete
+    // There can be a more sophisticated way of doing this in the future by doing cron jobs every x minutes to check profanity on all video labels with status that is not equal to good and only search gVideos in random trending videos
     let query = "match (a:Video)-[:PUBLISHED]-(c:Person) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b, c.avatarurl ORDER BY a.views DESC LIMIT 100";
+    let query2 = "match (a:Article)-[:PUBLISHED]-(c:Person) optional match (a:Article)-[r:RESPONSE]->(b:Article) return a, r, b, c.avatarurl ORDER BY a.reads DESC LIMIT 100";
     //let params = { skip: neo4j.int(skip) };
     let getHighestTrending = await session.run(query)
         .then(async (result) => {
             if (result) {
                 let graphRecords = result.records;
                 graphRecords = await contentutility.removeInvalidVideos(graphRecords); // Remove invalid record that have not been published/dont have video/profanity
-                return graphRecords;
+                let articles = await session2.run(query2)
+                    .then(async (result2) => {
+                        return result2.records;    
+                    });
+                if (articles && graphRecords) {
+                    return graphRecords.concat(articles);
+                } else {
+                    return graphRecords;
+                }
             } else {
                 return false;
             }
@@ -100,7 +114,9 @@ const serveRandomTrendingVideos = async (user = "", amount = 10) => {
                 data = contentutility.appendArticleResponses(data); // Append article responses to content
                 // To do add method to get articles and mix into amongst main page data
                 if (data) {
-                    data = utility.shuffleArray(data); // Do shuffle of records
+                    data = utility.shuffleArray(data); // Do shuffle of records as to not refer strictly the top 10
+                    // get amount and find percentages that would amount to x amount of videos, x amount of articles. 
+                    // Do this to determine the ratio of videos to articles, e.g 70% videos, 30% articles
                     data = data.slice(0, amount); // Slice videos down to 10 out of potential 100.
                     return data;
                 } else {
@@ -292,8 +308,11 @@ const checkNodeExists = async (id, type = "video") => {
         if (id.length > 0) {
             let session = driver.session();
             let query = "match ( a:Video {mpd: $id}) return a";
+            if (type == "article") {
+                query = "match ( a:Article {id: $id}) return a";
+            }
             query = videoOrArticle(type, query);
-            const videoFound = await session.run(query, {id: id })
+            const nodeFound = await session.run(query, {id: id })
                 .then(async (result) => {
                     session.close();
                     if (result.records) {
@@ -303,8 +322,9 @@ const checkNodeExists = async (id, type = "video") => {
                             return false;
                         }
                     }
+                    return false;
                 })
-            return videoFound;
+            return nodeFound;
         }
         return false;
     }
@@ -688,7 +708,7 @@ const fetchSingleVideoData = async (mpd, user) => {
                             }
                             video.mpd = result.records[0]._fields[0].properties.mpd;
                             video.thumbnail = resolveEmptyData(result.records[0], "thumbnailUrl");
-                            // Append article and video responses of this video to articleResponses data member
+                            // Append article and video responses of this video to articleResponses/videoResponses data member
                             for (let i = 0; i < result.records.length; i++) { // Only iterate through 3rd field (_fields[2]). That holds cypher variable b
                                 if (result.records[i]) {
                                     console.log(result.records[i]);
@@ -699,7 +719,7 @@ const fetchSingleVideoData = async (mpd, user) => {
                                                 result.records[i]._fields[2].properties.dislikes = parseInt(result.records[i]._fields[2].properties.dislikes);
                                                 result.records[i]._fields[2].properties.reads = parseInt(result.records[i]._fields[2].properties.reads);
                                                 data.articleResponses.push(result.records[i]._fields[2].properties);
-                                            } else if (result.records[i]._fields[2].labels[0] == "Video" && result.records[i]._fields[2].properties.mpd != video.mpd) {
+                                            } else if (result.records[i]._fields[2].labels[0] == "Video" && result.records[i]._fields[2].properties.mpd != video.mpd || result.records[i]._fields[2].labels[0] == "gVideo" && result.records[i]._fields[2].properties.mpd != video.mpd) {
                                                 if (result.records[i]._fields[2].properties.status != 'good' || !result.records[i]._fields[2].properties.status) {
                                                     result.records[i]._fields[2] = 'null';
                                                 } else {
@@ -716,7 +736,7 @@ const fetchSingleVideoData = async (mpd, user) => {
                         }
                         if (result.records[0]._fields[3]) { // Only look 4th field (_fields[3]) That holds cypher variable c. Parent document is responding to
                             if (result.records[0]._fields[3].properties) {
-                                if (result.records[0]._fields[3].labels[0] == "Video") {
+                                if (result.records[0]._fields[3].labels[0] == "Video" || result.records[0]._fields[3].labels[0] == "gVideo") {
                                     result.records[0]._fields[3].properties.likes = parseInt(result.records[0]._fields[3].properties.likes);
                                     result.records[0]._fields[3].properties.dislikes = parseInt(result.records[0]._fields[3].properties.dislikes);
                                     result.records[0]._fields[3].properties.views = parseInt(result.records[0]._fields[3].properties.views);
@@ -875,13 +895,17 @@ const getUserLikedDisliked = async (id, type, user) => {
 }
 
 // Will check for optional already existing WATCHED relationship and delete, then merge new WATCHED relationship with milliseconds since epoch (january 1, 1970)
-const setWatchedRelationship = async (mpd, user) => {
+const setWatchReadRelationship = async (id, user, type = "video") => {
     try {
         const d = new Date().getTime();
         let session = driver.session();
         let query = "match ( a:Person { name: $user }), ( b:Video { mpd: $mpd }) optional match (a)-[r:WATCHED]->(b) delete r merge (a)-[r2:WATCHED { time: $ms }]->(b) return a, r2, b";
-        let params = { user: user, ms: d, mpd: mpd };
-        return await session.run(query, params)
+        let params = { user: user, ms: d, mpd: id };
+        if (type == "article") {
+            query = "match ( a:Person { name: $user }), ( b:Article { id: $id }) optional match (a)-[r:READ]->(b) delete r merge (a)-[r2:READ { time: $ms }]->(b) return a, r2, b";
+            params = { user: user, ms: d, id: id };
+        }
+        return await session.run(query, params);
     } catch (err) {
         return err;
     }
@@ -890,47 +914,65 @@ const setWatchedRelationship = async (mpd, user) => {
 
 /** Experimental high frequency increment video views on redis database. Returns boolean
 Accurate and reliable incrementation is maintained in redis, record values are simply copied to neo4j */
-const incrementVideoView = async (mpd, user) => {
+const incrementContentViewRead = async (id, user, type = "video") => {
     try {
-        let redisAccessible = true;
-        let videoExists = await checkNodeExists(mpd);
-        if (videoExists) {
-            let videoExistsRedis = await rediscontentclient.select(1, async function(err, res) {
-                if (res == "OK") {
-                    return await rediscontentclient.hgetall(mpd, (err, value) => {
-                        if (!err) {
-                            return value;
-                        }
-                        return "failed, do not update";
-                    });
-                } else {
-                    redisAccessible = false;
-                }
-                return false;
-            });
-            if (!redisAccessible) {
-                return false;
+        if (type == "video" || type == "article") {
+            let redisAccessible = true;
+            let db = 1; // Use 1 for videos, 2 for articles
+            let marker = "views";
+            if (type == "article") {
+                db = 2;
+                marker = "reads";
             }
-            return await rediscontentclient.select(1, async function(err, res) {
-                return await setWatchedRelationship(mpd, user)
-                    .then( async (result) => {
-                        if (videoExistsRedis == "failed, do not update") {
-                            return false;
-                        } else if (videoExistsRedis) {
-                            rediscontentclient.hincrby(mpd, "views", 1);
-                            return await rediscontentclient.hgetall(mpd, (err, value) => {
-                                setVideoViewsNeo(mpd, value.views);
-                                return true;
-                            })
-                        } else {
-                            rediscontentclient.hmset(mpd, "views", 1, "likes", 0, "dislikes", 0);
-                            return await rediscontentclient.hgetall(mpd, (err, value) => {
-                                setVideoViewsNeo(mpd, value.views);
-                                return true;
-                            })
-                        }
-                    })
-            });
+            let contentExists = await checkNodeExists(id, type);
+            if (contentExists) {
+                let contentExistsRedis = await rediscontentclient.select(db, async function(err, res) {
+                    if (res == "OK") {
+                        return await rediscontentclient.hgetall(id, (err, value) => {
+                            if (!err) {
+                                return value;
+                            }
+                            return "failed, do not update";
+                        });
+                    } else {
+                        redisAccessible = false;
+                    }
+                    return false;
+                });
+                if (!redisAccessible) {
+                    return false;
+                }
+                return await rediscontentclient.select(db, async function(err, res) {
+                    return await setWatchReadRelationship(id, user, type)
+                        .then( async (result) => {
+                            if (contentExistsRedis == "failed, do not update") {
+                                return false;
+                            } else if (contentExistsRedis) {
+                                rediscontentclient.hincrby(id, marker, 1);
+                                return await rediscontentclient.hgetall(id, (err, value) => {
+                                    console.log(value);
+                                    if (type == "video") {
+                                        setVideoViewsArticleReadsNeo(id, value.views, "video");
+                                    } else {
+                                        setVideoViewsArticleReadsNeo(id, value.reads, "article");
+                                    }
+                                    return true;
+                                });
+                            } else {
+                                rediscontentclient.hmset(id, marker, 1, "likes", 0, "dislikes", 0);
+                                return await rediscontentclient.hgetall(id, (err, value) => {
+                                    
+                                    if (type == "video") {
+                                        setVideoViewsArticleReadsNeo(id, value.views, "video");
+                                    } else {
+                                        setVideoViewsArticleReadsNeo(id, value.reads, "article");
+                                    }
+                                    return true;
+                                });
+                            }
+                        })
+                });
+            }
         }
     } catch (err) {
         return false;
@@ -1163,12 +1205,16 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
 
 /** Sets video views by passed value. Is not incremental which can cause inaccuracy on neo4j. Inconsequential if fails or not working well, can replace with method that
 updates all neo4j video records on schedule. Views are reliably incremented with redis */
-const setVideoViewsNeo = async (mpd, value) => {
+const setVideoViewsArticleReadsNeo = async (id, value, type = "video") => {
     try {
         if (parseInt(value)) {
             let session = driver.session();
             let query = "match (a:Video {mpd: $mpd}) set a.views = $views return a";
-            let params = { mpd: mpd, views: neo4j.int(value) };
+            let params = { mpd: id, views: neo4j.int(value) };
+            if (type == "article") {
+                query = "match (a:Article {id: $id}) set a.reads = $reads return a";
+                params = { id: id, reads: neo4j.int(value) };
+            }
             return await session.run(query, params)
                 .then((result) => {
                 session.close();
@@ -1187,29 +1233,48 @@ const setVideoViewsNeo = async (mpd, value) => {
 }
 
 // When concatting two arrays of media together, check to see if duplicates are present before merging. Used for appending more videos to client dash
-const removeDuplicates = async (media, type = "video") => {
-    if (type == "video") {
-        for (let i = 0; i < media.length; i++) {
-            let found = 0;
-            if (media[i]) {
-                if (media[i]._fields) {
-                    if (media[i]._fields[0]) {
-                        if (utility.get(media[i]._fields[0], 'properties.mpd')) {
-                            for (let j = 0; j < media.length; j++) {
-                                if (media[j]) {
-                                    if (media[j]._fields) {
-                                        if (media[j]._fields[0]) {
-                                            if (utility.get(media[j]._fields[0], 'properties.mpd')) {
-                                                if (media[i]._fields[0].properties.mpd == media[j]._fields[0].properties.mpd) {
-                                                    if (found > 0) {
-                                                        // Cycles to check if any articles were missed by appending duplicate record with higher article response count
-                                                        if (media[i]._fields[0].properties.articles.length < media[j]._fields[0].properties.articles.length) {
-                                                            media[i]._fields[0].properties.articles = [...media[j]._fields[0].properties.articles];
-                                                        }
-                                                        media.splice(j, 1);
+const removeDuplicates = async (media) => {
+    for (let i = 0; i < media.length; i++) {
+        let found = 0;
+        if (media[i]) {
+            if (media[i]._fields) {
+                if (media[i]._fields[0]) {
+                    if (utility.get(media[i]._fields[0], 'properties.mpd')) {
+                        for (let j = 0; j < media.length; j++) {
+                            if (media[j]) {
+                                if (media[j]._fields) {
+                                    if (media[j]._fields[0]) {
+                                        if (utility.get(media[j]._fields[0], 'properties.mpd')) {
+                                            if (media[i]._fields[0].properties.mpd == media[j]._fields[0].properties.mpd) {
+                                                if (found > 0) {
+                                                    // Cycles to check if any articles were missed by appending duplicate record with higher article response count
+                                                    if (media[i]._fields[0].properties.articles.length < media[j]._fields[0].properties.articles.length) {
+                                                        media[i]._fields[0].properties.articles = [...media[j]._fields[0].properties.articles];
                                                     }
-                                                    found++;
+                                                    media.splice(j, 1);
                                                 }
+                                                found++;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        for (let j = 0; j < media.length; j++) {
+                            if (media[j]) {
+                                if (media[j]._fields) {
+                                    if (media[j]._fields[0]) {
+                                        if (utility.get(media[j]._fields[0], 'properties.id')) {
+                                            if (media[i]._fields[0].properties.id == media[j]._fields[0].properties.id) {
+                                                if (found > 0) {
+                                                    // Cycles to check if any articles were missed by appending duplicate record with higher article response count
+                                                    if (media[i]._fields[0].properties.articles.length < media[j]._fields[0].properties.articles.length) {
+                                                        media[i]._fields[0].properties.articles = [...media[j]._fields[0].properties.articles];
+                                                    }
+                                                    media.splice(j, 1);
+                                                }
+                                                found++;
                                             }
                                         }
                                     }
@@ -1700,7 +1765,7 @@ module.exports = {
     deleteOneVideo: deleteOneVideo,
     fetchSingleVideoData: fetchSingleVideoData,
     fetchSingleArticleData: fetchSingleArticleData,
-    incrementVideoView: incrementVideoView,
+    incrementContentViewRead: incrementContentViewRead,
     createOneUser: createOneUser,
     fetchOneUser: fetchOneUser,
     incrementLike: incrementLike,
