@@ -1,5 +1,7 @@
 const processprofanity = require('./processprofanity.js');
 const quarantine = require('./quarantine.js');
+const { get } = require('./utility.js');
+
 // Remove all records with empty titles, are not published or have bad state(profanity found, user lost posting permissions, etc). This will remove videos that have been uploaded to db but have not yet been published/available for public
 const removeInvalidVideos = async (graphRecords) => {
     graphRecords = await removeBadVideos(graphRecords).then( async (graphRecords) => {
@@ -75,21 +77,27 @@ const removeBadVideos = async (graphRecords, field = 0, profile) => {
 }
 
 // Appends appropriate article responses to respective records of content. Should work with either articles or videos
-const appendArticleResponses = (graphRecords) => {
+const appendResponses = (graphRecords) => {
     try {
         graphRecords.forEach((record, i) => {
-            graphRecords[i]._fields[0].properties.articles = [];
+            graphRecords[i]._fields[0].properties.responses = [];
             let found = 0;
             for (let j = 0; j < graphRecords.length; j++) {
                 if (record._fields[0].properties.mpd) {
                     if (record._fields[0].properties.mpd === graphRecords[j]._fields[0].properties.mpd) {
                         found++;
-                        if (graphRecords[j]._fields[2]) {
+                        if (graphRecords[j]._fields[2]) { 
+                            console.log(graphRecords[j]._fields[2].properties.title);
+                            console.log(record._fields[0].properties.title);
                             // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
                             graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
                             graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);
-                            graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
-                            record._fields[0].properties.articles.push(graphRecords[j]._fields[2]);
+                            if (graphRecords[j]._fields[2].properties.reads) {
+                                graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
+                            } else {
+                                graphRecords[j]._fields[2].properties.views = parseInt(graphRecords[j]._fields[2].properties.views);
+                            }
+                            record._fields[0].properties.responses.push(graphRecords[j]._fields[2]);
                         }
                         if (found > 1) {
                             graphRecords.splice(j, 1);
@@ -100,11 +108,16 @@ const appendArticleResponses = (graphRecords) => {
                     if (record._fields[0].properties.id === graphRecords[j]._fields[0].properties.id) {
                         found++;
                         if (graphRecords[j]._fields[2]) {
+                            console.log(record._fields[0].properties.title);
                             // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
                             graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
                             graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);
-                            graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
-                            record._fields[0].properties.articles.push(graphRecords[j]._fields[2]);
+                            if (graphRecords[j]._fields[2].properties.reads) {
+                                graphRecords[j]._fields[2].properties.reads = parseInt(graphRecords[j]._fields[2].properties.reads);
+                            } else {
+                                graphRecords[j]._fields[2].properties.views = parseInt(graphRecords[j]._fields[2].properties.views);
+                            }
+                            record._fields[0].properties.responses.push(graphRecords[j]._fields[2]);
                         }
                         if (found > 1) {
                             graphRecords.splice(j, 1);
@@ -114,10 +127,17 @@ const appendArticleResponses = (graphRecords) => {
                 }
             }
             let views = 0;
+            let reads = 0;
             if (record._fields[0].properties.views) {
                 views = record._fields[0].properties.views.toNumber();
+            } else if (record._fields[0].properties.reads) {
+                reads = record._fields[0].properties.reads.toNumber();
             }
-            graphRecords[i]._fields[0].properties.views = views;
+            if (graphRecords[i]._fields[0].properties.views) {
+                graphRecords[i]._fields[0].properties.views = views;
+            } else if (graphRecords[i]._fields[0].properties.reads) {
+                graphRecords[i]._fields[0].properties.reads = reads;
+            }
         });
         return graphRecords;
     } catch (err) {
@@ -126,6 +146,6 @@ const appendArticleResponses = (graphRecords) => {
 }
 
 module.exports = { removeInvalidVideos: removeInvalidVideos,
-                  appendArticleResponses: appendArticleResponses,
+                  appendResponses: appendResponses,
                   removeBadVideos: removeBadVideos
                  };

@@ -27,6 +27,7 @@ const maintenance = require('./queuemaintenance.js');
 const cloudfrontconfig = require('./servecloudfront');
 const neo = require('./neo.js');
 const recommendations = require('./recommendations.js');
+const payment = require('./payment.js');
 const processimage = require('./processimage.js');
 const { badLabels } = require('./processprofanity.js');
 const { deleteOne } = require('./utility.js');
@@ -94,20 +95,7 @@ module.exports = function(io) {
             }
         }
     })
-    const receiveMessages = function(sqsQueue) {
-        console.log(sqsQueue);
-        if (sqsQueue) {
-            const params = {
-                QueueUrl: sqsQueue,
-                MaxNumberOfMessages: '10',
-                WaitTimeSeconds: 20
-            }
-            sqs.receiveMessage(params, function(err, data) {
-                if (err) console.log(err, err.stack); // an error occurred
-                else     console.log(data);           // successful response
-            })
-        }
-    }
+    
     setInterval(() => {
         receiveMessages(sqsQueue);
     }, 2500000);
@@ -664,6 +652,7 @@ module.exports = function(io) {
                 ],
                 videos: [],
                 avatarurl: '',
+                payment: await payment.createOneStripeCustomer(),
                 chats: [
                     {
                         confirmed: [
@@ -697,7 +686,7 @@ module.exports = function(io) {
                                             signed: true,
                                             path: '/'
                                         }
-                                        neo.createOneUser(user.username, user._id);
+                                        neo.createOneUser(user.username, user._id, user.email );
                                         res.cookie('loggedIn', user.username, [options]);
                                         return res.json({querystatus: "loggedin", user: user.username });
                                     }
@@ -1625,10 +1614,24 @@ module.exports = function(io) {
         }
     }
     
+    const getClientSecret = async (req, res, next) => {
+        let userPayment = await User.findOne({username:req.body.user}).lean();
+        if (userPayment) {
+            return res.json(await payment.sendIntentSetupToClient(userPayment.payment));
+        } else {
+            return res.json(false);
+        }
+    }
+    
     const fetchProfileOptionsData = async (req, res, next) => {
         try {
             if (req.body.user) {
-                return res.json(await neo.fetchOneUser(req.body.user));
+                let user = await neo.fetchOneUser(req.body.user);
+                if (user) {
+                    return res.json(user);
+                } else {
+                    return res.json(false);
+                }
             } else {
                 return res.json(false);
             }
@@ -1936,6 +1939,10 @@ module.exports = function(io) {
     
     router.post('/fetchcloudfronturl', (req, res, next) => {
         return fetchCloudfrontUrl(req, res, next);
+    })
+    
+    router.post('/getclientsecret', (req, res, next) => {
+        return getClientSecret(req, res, next);
     })
     
     // GET a users profile

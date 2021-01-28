@@ -55,6 +55,10 @@ const UserSchema = new mongoose.Schema({
     articles: {
         type: Array,
         required: true
+    },
+    payment: {
+        type: String,
+        required: true
     }
 });
 

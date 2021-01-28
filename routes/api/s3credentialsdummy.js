@@ -20,5 +20,9 @@ exports = module.exports = {
         address: "bolt://anaddress:aport",
         username: "XXXXXXXX",
         password: "XXXXXXXXXXXXXXX"
+    },
+    stripe: {
+        testkey: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        key: ''
     }
 };

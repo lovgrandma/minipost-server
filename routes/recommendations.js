@@ -193,14 +193,21 @@ const getRelatedContent = async (id, type, paginate, title) => {
 
 const getHighestRelatedOnContent = async (id, type, paginate) => {
     let session = driver.session();
-    let query = 'match ( a:Video { mpd: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:gVideo) return b, count(b) as total limit $paginate';
+    let query = 'match ( a:Video { mpd: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:gVideo) return b, count(b) as total limit $paginate union match ( a:Video { mpd: $id })-[:WATCHED]-(:Person)-[:READ]-(b:Article) return b, count(b) as total limit $paghalf ';
+    let params = { id: id, paginate: neo4j.int(paginate), paghalf: neo4j.int(paginate/3) };
     if (type == 'article') {
-        query = 'match ( a:Article { id: $id })-[:WATCHED]-(:Person)-[:WATCHED]-(b:Article) return b, count(b) as total limit $paginate';
+        query = 'match ( a:Article { id: $id })-[:READ]-(:Person)-[:READ]-(b:Article) return b, count(b) as total limit $paginate union match (a:Article { id: $id })-[:READ]-(:Person)-[:WATCHED]-(b:gVideo) return b, count(b) as total limit $paginate';
+        params.paghalf = neo4j.int(paginate);
     }
-    let params = { id: id, paginate: neo4j.int(paginate) };
+    // paghalf is used to refer less articles as a limit to show more videos
     let data = await session.run(query, params);
     for (let i = 0; i < data.records.length; i++) {
         data.records[i]._fields[1] = neo4j.integer.toNumber(data.records[i]._fields[1]);
+        if (data.records[i]._fields[0].properties.reads) {
+            if (data.records[i]._fields[0].properties.reads.low) {
+                data.records[i]._fields[0].properties.reads = data.records[i]._fields[0].properties.reads.low;
+            }
+        }
         console.log(data.records[i]._fields[1]);
     }
     return data;

@@ -47,7 +47,6 @@ const serveVideoRecommendations = async (user = "", append = []) => {
             // so pass user, watched or unwatched filter to determine if to return watched videos, possibly a history maybe
             if (append.length > 0) {
                 append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)));
-                console.log(append.length);
                 if (append.length > 0) {
                     append = append.slice(originalLength, append.length);
                 }
@@ -89,8 +88,8 @@ const serveRandomTrendingVideos = async (user = "", amount = 10) => {
     // Why search for videos when gVideos are the only videos that are quarantined to be displayed?
     // We search for all for now because this is what initiates the request to amazon to check if video profanity results are complete
     // There can be a more sophisticated way of doing this in the future by doing cron jobs every x minutes to check profanity on all video labels with status that is not equal to good and only search gVideos in random trending videos
-    let query = "match (a:Video)-[:PUBLISHED]-(c:Person) optional match (a:Video)-[r:RESPONSE]->(b:Article) return a, r, b, c.avatarurl ORDER BY a.views DESC LIMIT 100";
-    let query2 = "match (a:Article)-[:PUBLISHED]-(c:Person) optional match (a:Article)-[r:RESPONSE]->(b:Article) return a, r, b, c.avatarurl ORDER BY a.reads DESC LIMIT 100";
+    let query = "match (a:Video)-[:PUBLISHED]-(c:Person) optional match (a)-[r:RESPONSE]->(b) return a, r, b, c.avatarurl ORDER BY a.views DESC LIMIT 100";
+    let query2 = "match (a:Article)-[:PUBLISHED]-(c:Person) optional match (a)-[r:RESPONSE]->(b) return a, r, b, c.avatarurl ORDER BY a.reads DESC LIMIT 100";
     //let params = { skip: neo4j.int(skip) };
     let getHighestTrending = await session.run(query)
         .then(async (result) => {
@@ -111,10 +110,9 @@ const serveRandomTrendingVideos = async (user = "", amount = 10) => {
             }
         }).then( async (data) => {
             if (data) {
-                data = contentutility.appendArticleResponses(data); // Append article responses to content
-                // To do add method to get articles and mix into amongst main page data
+                data = contentutility.appendResponses(data); // Append article responses to content // Change to append responses
                 if (data) {
-                    data = utility.shuffleArray(data); // Do shuffle of records as to not refer strictly the top 10
+                    data = utility.shuffleArray(data); // Shuffle records as to not refer strictly the top 10
                     // get amount and find percentages that would amount to x amount of videos, x amount of articles. 
                     // Do this to determine the ratio of videos to articles, e.g 70% videos, 30% articles
                     data = data.slice(0, amount); // Slice videos down to 10 out of potential 100.
@@ -159,7 +157,7 @@ const checkFriends = async (user) => {
                     let completeUserGraphDbCheck = await checkUserExists(user)
                         .then(async(result) => {
                             if (!result) { // If user does not exist, add single new user to graph database
-                                return await createOneUser(user, userDoc._id);
+                                return await createOneUser(user, userDoc._id, userDoc.email );
                             }
                             return;
                         })
@@ -187,7 +185,7 @@ const checkFriends = async (user) => {
                                                         checkUserExists(mongoRecord.username)
                                                             .then(async (result) => {
                                                             if (!result) {
-                                                                resolve(await createOneUser(mongoRecord.username, otherUser._id ));
+                                                                resolve(await createOneUser(mongoRecord.username, otherUser._id, otherUser.email ));
                                                             }
                                                             resolve(true);
                                                         })
@@ -332,10 +330,10 @@ const checkNodeExists = async (id, type = "video") => {
 }
 
 /* Add one user to graph database */
-const createOneUser = async (user, id) => {
+const createOneUser = async (user, id, email = "") => {
     session = driver.session();
-    query = "create (a:Person {name: $username, id: $id, avatarurl: '' }) return a";
-    const userCreated = session.run(query, { username: user, id: id })
+    query = "create (a:Person {name: $username, id: $id, avatarurl: '', email: $email }) return a";
+    const userCreated = session.run(query, { username: user, id: id, email: email })
         .then(async(result) => {
             session.close();
             if (result) {
@@ -1248,8 +1246,8 @@ const removeDuplicates = async (media) => {
                                             if (media[i]._fields[0].properties.mpd == media[j]._fields[0].properties.mpd) {
                                                 if (found > 0) {
                                                     // Cycles to check if any articles were missed by appending duplicate record with higher article response count
-                                                    if (media[i]._fields[0].properties.articles.length < media[j]._fields[0].properties.articles.length) {
-                                                        media[i]._fields[0].properties.articles = [...media[j]._fields[0].properties.articles];
+                                                    if (media[i]._fields[0].properties.responses.length < media[j]._fields[0].properties.responses.length) {
+                                                        media[i]._fields[0].responses.articles = [...media[j]._fields[0].responses.articles];
                                                     }
                                                     media.splice(j, 1);
                                                 }
@@ -1269,8 +1267,8 @@ const removeDuplicates = async (media) => {
                                             if (media[i]._fields[0].properties.id == media[j]._fields[0].properties.id) {
                                                 if (found > 0) {
                                                     // Cycles to check if any articles were missed by appending duplicate record with higher article response count
-                                                    if (media[i]._fields[0].properties.articles.length < media[j]._fields[0].properties.articles.length) {
-                                                        media[i]._fields[0].properties.articles = [...media[j]._fields[0].properties.articles];
+                                                    if (media[i]._fields[0].properties.responses.length < media[j]._fields[0].properties.responses.length) {
+                                                        media[i]._fields[0].properties.responses = [...media[j]._fields[0].responses.articles];
                                                     }
                                                     media.splice(j, 1);
                                                 }
@@ -1400,32 +1398,40 @@ const incrementLike = async (like, increment, id, type, user) => {
 const setContentData = async (values, type, id) => {
     try {
         let viewsOrReads = "views";
-        console.log(values);
-        if (values.likes) {
-            let session = driver.session();
-            let query = "match (a:Video {mpd: $id}) set a.likes = $likes, a.dislikes = $dislikes";
-            let params = { likes: neo4j.int(values.likes), dislikes: neo4j.int(values.dislikes), id: id };
-            if (values.views) {
-                query += ", a.views = $views";
-                params.views = neo4j.int(values.views);
-            }
-            query += " return a";
-            if (type.normalize().toLocaleLowerCase() == "article") {
-                viewsOrReads = "reads";
-                query = "match (a:Article {id: $id}) set a.likes = $likes, a.dislikes = $dislikes";
-                if (values.reads) {
-                    query += ", a.reads = $reads";
-                    params.reads = neo4j.int(values.reads);
-                }
-                query += " return a";
-            }
-            return await session.run(query, params)
-                .then((result) => {
-                    session.close();
-                    return true;
-                })
+        let session = driver.session();
+        let query = "match (a:Video {mpd: $id}) set ";
+        let params = { id: id };
+        if (type.normalize().toLocaleLowerCase() == "article") {
+            viewsOrReads = "reads";
+            query = "match (a:Article {id: $id})";
         }
+        if (values.likes && values.dislikes) {
+            query += "a.likes = $likes, a.dislikes = $dislikes";
+            params.likes = neo4j.int(values.likes);
+            params.dislikes = neo4j.int(values.dislikes);
+        } else if (values.likes) {
+            query += "a.likes = $likes";
+            params.likes = neo4j.int(values.likes);
+        } else {
+            query += "a.dislikes = $dislikes";
+            params.dislikes = neo4j.int(values.dislikes);
+        }
+        if (values.views) {
+            query += ", a.views = $views";
+            params.views = neo4j.int(values.views);
+        }
+        if (values.reads) {
+            query += ", a.reads = $reads";
+            params.reads = neo4j.int(values.reads);
+        }
+        query += " return a";
+        return await session.run(query, params)
+            .then((result) => {
+                session.close();
+            return true;
+        })
     } catch (err) {
+        console.log(err);
         return false;
     }
 }
