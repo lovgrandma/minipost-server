@@ -308,6 +308,8 @@ const checkNodeExists = async (id, type = "video") => {
             let query = "match ( a:Video {mpd: $id}) return a";
             if (type == "article") {
                 query = "match ( a:Article {id: $id}) return a";
+            } else if (type == "AdVideo") {
+                query = "match ( a:AdVideo {mpd: $id}) return a";
             }
             query = videoOrArticle(type, query);
             const nodeFound = await session.run(query, {id: id })
@@ -362,8 +364,12 @@ const mergeOneFriendEdge = async (user, to) => {
 
 /** Creates or updates one video record in graph db. Returns full record
 Requires user, users uuid and mpd. Other methods must be empty string or in tags case must be empty array.
+video.published = set to true externally when mongo record is not awaiting info or processing
+video.status = will be bad, waiting;0, waiting;*timesincelastcheck* or good. This is whether or not nudity was found or not. 
+video.nudity = this is whether or not the user has advised us that there is nudity or not. If nudity is found and status is bad, manually we must set video.status to "nudegood" to inform when videos are being filtered through that: "this video has nudity, but minipost has reviewed and allowed it to circulate in minipost recommendation system as a normal 'good' status video"
+video.live = this is only present on ads. Videos are automatically circulating in recommendation system if status = good or nudegood, but for ads it requires an extra step. This step is to set live to true and create a redis history record. This record tracks clicks + impressions (views) each day. This is used to track if ad has surpassed daily budget.
 */
-const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType, thumbnailUrl = null) => {
+const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType, thumbnailUrl = null, advertisement = null, adData = null) => {
     if (user && mpd) {
         let videoCreateProcessComplete = checkUserExists(user)
         .then(async (result) => {
@@ -372,6 +378,9 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
             }
         })
         .then(async (result) => {
+            if (advertisement) {
+                return await checkNodeExists(mpd, "AdVideo");
+            }
             return await checkNodeExists(mpd);
         })
         .then(async (result) => {
@@ -381,11 +390,11 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
             if (videoMongo) {
                 if (videoMongo.state) {
                     if (!videoMongo.state.match(/([0-9].*);([a-z].*)/)) {
-                        videoPublished = true;
+                        videoPublished = true; // this should be true if the mongo record is not waiting for a title or is not waiting to be processed
                     }
                 }
             }
-            session = driver.session();
+            let session = driver.session();
             /* If result is null, create new video else update existing video in graph db */
             if (!result && videoMongo) {
                 if (!description) {
@@ -394,19 +403,50 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 if (!tags) {
                     tags = "";
                 }
-                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl, profanityJobId: '' }) return a";
-                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, publishDate: publishDate, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl, videoPublished: videoPublished };
+                let query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl, profanityJobId: '' }) return a";
+                let params = { mpd: mpd, user: user, userUuid: userUuid, title: title, description: description, nudity: nudity, tags: tags, thumbnailUrl: thumbnailUrl, videoPublished: videoPublished };
+                if (publishDate) { // The document can be created without a publishDate. If there is a publish date add it to params
+                    params.publishDate = neo4j.int(publishDate);
+                    query = "create (a:Video { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, likes: 0, dislikes: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl, profanityJobId: '' }) return a";
+                }
+                if (advertisement) {
+                    query = "create (a:AdVideo { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, description: $description, nudity: $nudity, tags: $tags, views: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl, profanityJobId: '', startDate: $startDate, endDate: $endDate, dailyBudget: $dailyBudget, adUrl: $adUrl, status: 'pending', clicks: 0 }) return a";
+                    if (publishDate) { // The document can be created without a publishDate. If there is a publish date add it to params
+                        query = "create (a:AdVideo { mpd: $mpd, author: $user, authorUuid: $userUuid, title: $title, publishDate: $publishDate, description: $description, nudity: $nudity, tags: $tags, views: 0, published: $videoPublished, thumbnailUrl: $thumbnailUrl, profanityJobId: '', startDate: $startDate, endDate: $endDate, dailyBudget: $dailyBudget, adUrl: $adUrl, status: 'pending', clicks: 0 }) return a";
+                    }
+                    params.startDate = null;
+                    params.endDate = null;
+                    params.dailyBudget = null;
+                    params.adUrl = null;
+                    if (adData) {
+                        if (adData.startDate) {
+                            params.startDate = adData.startDate;
+                        }
+                        if (adData.endDate) {
+                            params.endDate = adData.endDate;
+                        }
+                        if (adData.dailyBudget) {
+                            params.dailyBudget = adData.dailyBudget;    
+                        }
+                        if (adData.adUrl) {
+                            params.adUrl = adData.adUrl;
+                        }
+                    }
+                }
                 const videoRecordCreated = await session.run(query, params)
                     .then(async (record) => {
                         session.close();
                         let session2 = driver.session();
                         // Will merge author node to just created video node in neo4j
                         query = "match (a:Person {name: $user}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        if (advertisement) {
+                            query = "match (a:Person {name: $user}), (b:AdVideo {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        }
                         session2.run(query, params);
                         return record;
                     })
                     .then(async (record) => {
-                        if (responseTo) {
+                        if (responseTo && !advertisement) {
                             let session3 = driver.session();
                             params = { mpd: mpd, responseTo: responseTo };
                             if (responseType == "video") {
@@ -422,21 +462,18 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 return videoRecordCreated;
             } else {
                 let query = "match (a:Video { mpd: $mpd }) set a += { ";
+                if (advertisement) {
+                    query = "match (a:AdVideo { mpd: $mpd }) set a += {";
+                }
                 let params = { mpd: mpd, author: user, userUuid: userUuid, title: title };
+                if (publishDate) {
+                    params.publishDate = neo4j.int(publishDate);
+                }
                 let addedOne = 0;
                 if (title) {
                     if (title.length > 0) {
                         query += "title: $title";
                         params.title = title;
-                        addedOne++;
-                    }
-                }
-                addedOne > 0 ? query += ", " : null;
-                addedOne = 0;
-                if (publishDate) {
-                    if (publishDate.length > 0) {
-                        query += "publishDate: $publishDate";
-                        params.publishDate = publishDate;
                         addedOne++;
                     }
                 }
@@ -471,26 +508,51 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                 addedOne = 0;
                 query += "tags: $tags";
                 params.tags = tags;
+                addedOne++;
                 if (videoMongo) {
                     if (videoPublished) {
-                        addedOne++;
                         addedOne > 0 ? query += ", " : null;
                         addedOne = 0;
                         query+= "published: true";
+                        addedOne++;
                     }
                 }
-                query += " } return a";
+                params.startDate = null;
+                params.endDate = null;
+                params.dailyBudget = null;
+                params.adUrl = null;
+                if (advertisement && adData) {
+                    params.startDate = adData.startDate;
+                    params.endDate = adData.endDate;
+                    params.dailyBudget = adData.dailyBudget;
+                    params.adUrl = adData.adUrl;
+                    addedOne > 0 ? query += ", " : null;
+                    addedOne = 0;
+                    query += "adUrl: $adUrl";
+                    addedOne++;
+                }
+                if (advertisement && publishDate) {
+                    query += " } with a where a.publishDate is null set a.publishDate = $publishDate with a where a.startDate is null set a.startDate = $startDate with a where a.endDate is null set a.endDate = $endDate with a where a.dailyBudget is null set a.dailyBudget = $dailyBudget return a"; // Cannot change publish date, start date, end date or daily budget
+                } else if (advertisement) {
+                    query += " } with a where a.startDate is null set a.startDate = $startDate with a where a.endDate is null set a.endDate = $endDate with a where a.dailyBudget is null set a.dailyBudget = $dailyBudget return a"; // Cannot change publish date, start date, end date or daily budget
+                } else if (publishDate) {
+                    query += " } with a where a.publishDate is null set a.publishDate = $publishDate return a"; // Cannot change publish date
+                } else {
+                    query += " } return a"; // Cannot change publish date
+                }
                 const videoRecordUpdated = await session.run(query, params)
                     .then(async (record) => {
-                        session.close();
                         let session2 = driver.session();
                         // Will merge author node to just created video node in neo4j
                         query = "match (a:Person {name: $user}), (b:Video {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        if (advertisement) {
+                            query = "match (a:Person {name: $user}), (b:AdVideo {mpd: $mpd}) merge (a)-[r:PUBLISHED]->(b)";
+                        }
                         session2.run(query, params);
                         return record;
                     })
                     .then(async (record) => {
-                        if (responseTo) {
+                        if (responseTo && !advertisement) {
                             let session3 = driver.session();
                             params = { mpd: mpd, responseTo: responseTo };
                             if (responseType == "video") {
@@ -502,7 +564,10 @@ const createOneVideo = async (user, userUuid, mpd, title, description, nudity, t
                             }
                         }
                         return record;
-                    });
+                    })
+                    .catch((err) => {
+                        console.log(err);
+                    })
                 return videoRecordUpdated;
             }
         })
@@ -595,17 +660,22 @@ const deleteOneArticle = async (id) => {
 }
 
 /* Deletes one video from database. */
-const deleteOneVideo = async (mpd) => {
+const deleteOneVideo = async (mpd, type = "Video") => {
     try {
         if (mpd) {
             if (mpd.length > 0) {
                 let session = driver.session();
                 let query = "match (a:Video { mpd: $mpd })-[r]-() WITH a, r, a.thumbnailUrl AS thumbnailUrl DELETE a, r RETURN thumbnailUrl";
+                if (type == "AdVideo") {
+                    query = "match (a:AdVideo { mpd: $mpd })-[r]-() WITH a, r, a.thumbnailUrl AS thumbnailUrl DELETE a, r RETURN thumbnailUrl";
+                }
                 let params = { mpd: mpd };
                 let completeDeletion = await session.run(query, params);
                 if (completeDeletion) {
                     session.close();
                     return completeDeletion;
+                } else {
+                    return false;
                 }
             }
         }
@@ -639,10 +709,13 @@ const resolveEmptyData = (record, type, dataType = "string") => {
     return "";
 }
 
-const fetchSingleVideoData = async (mpd, user) => {
+const fetchSingleVideoData = async (mpd, user, ad = false) => {
     let session = driver.session();
     // Must query for original video and potential relational matches to articles. Not either/or or else query will not function properly
     let query = "match (a:Video {mpd: $mpd})-[:PUBLISHED]-(d:Person) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c, d";
+    if (ad) {
+        query = "match (a:gAdVideo {mpd: $mpd})-[:PUBLISHED]-(d:Person) optional match (a)-[r:RESPONSE]->(b) optional match (c)-[r2:RESPONSE]->(a) return a, r, b, c, d";
+    }
     let params = { mpd: mpd };
     let data = {
         video: {},
@@ -667,6 +740,13 @@ const fetchSingleVideoData = async (mpd, user) => {
                 viewable: false,
                 avatarurl: ""
             }
+            if (ad) {
+                video.startDate = "";
+                video.endDate = "";
+                video.dailyBudget = "";
+                video.adUrl = "";
+                
+            }
             // For each result records are stored in the chronological order that you return variables.
             // Here there are 4 variables. result.records[0]._fields[0] should store the original record a you are looking for
             // result.records[0]._fields[1] contains relationship info. This is generally not needed.
@@ -681,16 +761,24 @@ const fetchSingleVideoData = async (mpd, user) => {
                             video.title = result.records[0]._fields[0].properties.title.toString();
                             video.description = resolveEmptyData(result.records[0], "description"); // Unrequired data member
                             video.tags = resolveEmptyData(result.records[0], "tags", "array"); // Unrequired data member
-                            video.published = result.records[0]._fields[0].properties.publishDate;
-                            if (result.records[0]._fields[0].properties.likes.toNumber) {
-                                video.likes = result.records[0]._fields[0].properties.likes.toNumber();
+                            if (result.records[0]._fields[0].properties.publishDate.toNumber) {
+                                video.published = result.records[0]._fields[0].properties.publishDate.toNumber();
                             } else {
-                                video.likes = result.records[0]._fields[0].properties.likes;
+                                video.published = result.records[0]._fields[0].properties.publishDate;
                             }
-                            if (video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber) {
-                                video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
-                            } else {
-                                video.dislikes = result.records[0]._fields[0].properties.dislikes;
+                            if (result.records[0]._fields[0].properties.likes) {
+                                if (result.records[0]._fields[0].properties.likes.toNumber) {
+                                    video.likes = result.records[0]._fields[0].properties.likes.toNumber();
+                                } else {
+                                    video.likes = result.records[0]._fields[0].properties.likes;
+                                }
+                            }
+                            if (result.records[0]._fields[0].properties.dislikes) {
+                                if (video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber) {
+                                    video.dislikes = result.records[0]._fields[0].properties.dislikes.toNumber();
+                                } else {
+                                    video.dislikes = result.records[0]._fields[0].properties.dislikes;
+                                }
                             }
                             if (video.views = result.records[0]._fields[0].properties.views.toNumber) {
                                 video.views = result.records[0]._fields[0].properties.views.toNumber();
@@ -706,10 +794,17 @@ const fetchSingleVideoData = async (mpd, user) => {
                             }
                             video.mpd = result.records[0]._fields[0].properties.mpd;
                             video.thumbnail = resolveEmptyData(result.records[0], "thumbnailUrl");
+                            if (ad) {
+                                if (result.records[0]._fields[0].properties.startDate && result.records[0]._fields[0].properties.endDate && result.records[0]._fields[0].properties.dailyBudget && result.records[0]._fields[0].properties.adUrl) {
+                                    video.startDate = result.records[0]._fields[0].properties.startDate;
+                                    video.endDate = result.records[0]._fields[0].properties.endDate;
+                                    video.dailyBudget = result.records[0]._fields[0].properties.dailyBudget;
+                                    video.adUrl = result.records[0]._fields[0].properties.adUrl;
+                                }
+                            }
                             // Append article and video responses of this video to articleResponses/videoResponses data member
                             for (let i = 0; i < result.records.length; i++) { // Only iterate through 3rd field (_fields[2]). That holds cypher variable b
                                 if (result.records[i]) {
-                                    console.log(result.records[i]);
                                     if (result.records[i]._fields[2]) {
                                         if (result.records[i]._fields[2].properties) {
                                             if (result.records[i]._fields[2].labels[0] == "Article") {
@@ -898,10 +993,10 @@ const setWatchReadRelationship = async (id, user, type = "video") => {
         const d = new Date().getTime();
         let session = driver.session();
         let query = "match ( a:Person { name: $user }), ( b:Video { mpd: $mpd }) optional match (a)-[r:WATCHED]->(b) delete r merge (a)-[r2:WATCHED { time: $ms }]->(b) return a, r2, b";
-        let params = { user: user, ms: d, mpd: id };
+        let params = { user: user, ms: neo4j.int(d), mpd: id };
         if (type == "article") {
             query = "match ( a:Person { name: $user }), ( b:Article { id: $id }) optional match (a)-[r:READ]->(b) delete r merge (a)-[r2:READ { time: $ms }]->(b) return a, r2, b";
-            params = { user: user, ms: d, id: id };
+            params = { user: user, ms: neo4j.int(d), id: id };
         }
         return await session.run(query, params);
     } catch (err) {
@@ -912,7 +1007,7 @@ const setWatchReadRelationship = async (id, user, type = "video") => {
 
 /** Experimental high frequency increment video views on redis database. Returns boolean
 Accurate and reliable incrementation is maintained in redis, record values are simply copied to neo4j */
-const incrementContentViewRead = async (id, user, type = "video") => {
+const incrementContentViewRead = async (id, user, type = "video", ad = false) => {
     try {
         if (type == "video" || type == "article") {
             let redisAccessible = true;
@@ -922,7 +1017,12 @@ const incrementContentViewRead = async (id, user, type = "video") => {
                 db = 2;
                 marker = "reads";
             }
-            let contentExists = await checkNodeExists(id, type);
+            let contentExists;
+            if (ad && type == "video") {
+                contentExists = await checkNodeExists(id, "AdVideo");
+            } else {
+                contentExists = await checkNodeExists(id, type);
+            }
             if (contentExists) {
                 let contentExistsRedis = await rediscontentclient.select(db, async function(err, res) {
                     if (res == "OK") {
@@ -950,7 +1050,11 @@ const incrementContentViewRead = async (id, user, type = "video") => {
                                 return await rediscontentclient.hgetall(id, (err, value) => {
                                     console.log(value);
                                     if (type == "video") {
-                                        setVideoViewsArticleReadsNeo(id, value.views, "video");
+                                        if (ad) {
+                                            setVideoViewsArticleReadsNeo(id, value.views, "video", ad);
+                                        } else {
+                                            setVideoViewsArticleReadsNeo(id, value.views, "video");
+                                        }
                                     } else {
                                         setVideoViewsArticleReadsNeo(id, value.reads, "article");
                                     }
@@ -961,7 +1065,11 @@ const incrementContentViewRead = async (id, user, type = "video") => {
                                 return await rediscontentclient.hgetall(id, (err, value) => {
                                     
                                     if (type == "video") {
-                                        setVideoViewsArticleReadsNeo(id, value.views, "video");
+                                        if (ad) {
+                                            setVideoViewsArticleReadsNeo(id, value.views, "video", ad);
+                                        } else {
+                                            setVideoViewsArticleReadsNeo(id, value.views, "video");
+                                        }
                                     } else {
                                         setVideoViewsArticleReadsNeo(id, value.reads, "article");
                                     }
@@ -1203,11 +1311,14 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
 
 /** Sets video views by passed value. Is not incremental which can cause inaccuracy on neo4j. Inconsequential if fails or not working well, can replace with method that
 updates all neo4j video records on schedule. Views are reliably incremented with redis */
-const setVideoViewsArticleReadsNeo = async (id, value, type = "video") => {
+const setVideoViewsArticleReadsNeo = async (id, value, type = "video", ad = false) => {
     try {
         if (parseInt(value)) {
             let session = driver.session();
             let query = "match (a:Video {mpd: $mpd}) set a.views = $views return a";
+            if (type == "video" && ad) {
+                query = "match (a:gAdVideo {mpd: $mpd}) set a.views = $views return a";
+            }
             let params = { mpd: id, views: neo4j.int(value) };
             if (type == "article") {
                 query = "match (a:Article {id: $id}) set a.reads = $reads return a";
@@ -1288,9 +1399,11 @@ const removeDuplicates = async (media) => {
 }
 
 const videoOrArticle = (type, query) => {
-    if (type.normalize().toLocaleLowerCase() === "article") {
-        query = query.replace(":Video", ":Article");
-        query = query.replace("mpd:", "id:");
+    if (type) {
+        if (type.normalize().toLocaleLowerCase() === "article") {
+            query = query.replace(":Video", ":Article");
+            query = query.replace("mpd:", "id:");
+        }
     }
     return query;
 }
@@ -1403,7 +1516,7 @@ const setContentData = async (values, type, id) => {
         let params = { id: id };
         if (type.normalize().toLocaleLowerCase() == "article") {
             viewsOrReads = "reads";
-            query = "match (a:Article {id: $id})";
+            query = "match (a:Article {id: $id}) set ";
         }
         if (values.likes && values.dislikes) {
             query += "a.likes = $likes, a.dislikes = $dislikes";
@@ -1499,8 +1612,17 @@ const fetchProfilePageData = async (user, self) => {
                                                                     data.totalviews += parseInt(record._fields[1].properties.views);
                                                                     add = true;
                                                                 }
+                                                            } else if (label == "AdVideo") {
+                                                                record._fields[1].properties.views = parseInt(record._fields[1].properties.views);
+                                                                record._fields[1].properties.clicks = parseInt(record._fields[1].properties.clicks);
+                                                                add = true;
                                                             }
                                                             if (add) {
+                                                                if (record._fields[1].properties.publishDate) {
+                                                                    if (record._fields[1].properties.publishDate.toNumber) {
+                                                                        record._fields[1].properties.publishDate = record._fields[1].properties.publishDate.toNumber();
+                                                                    }
+                                                                }
                                                                 if (!record._fields[1].properties.title) {
                                                                     record._fields[1].properties.title = '';
                                                                 }
@@ -1508,6 +1630,8 @@ const fetchProfilePageData = async (user, self) => {
                                                                     if (record._fields[1].properties.status != 'good') {
                                                                         record._fields[1].properties.thumbnailUrl = '';
                                                                     }
+                                                                } else {
+                                                                    record._fields[1].properties.thumbnailUrl = '';
                                                                 }
                                                                 record._fields[1].properties.likes = parseInt(record._fields[1].properties.likes);
                                                                 record._fields[1].properties.dislikes = parseInt(record._fields[1].properties.dislikes);
@@ -1643,11 +1767,14 @@ const checkGoodResultsCeremony = (records) => {
 }
 
 // Sets profanity check job id reference on a created record
-const setProfanityCheck = (uuid, job, status) => {
+const setProfanityCheck = (uuid, job, status, type = "Video") => {
     let session = driver.session();
-    let nodeExists = checkNodeExists(uuid, "video");
+    let nodeExists = checkNodeExists(uuid, type);
     if (uuid && job && nodeExists && !status) {
         let query = "match (a:Video { mpd: $uuid}) set a += { profanityJobId: $profanityJobId, status: 'waiting;0' } return a";
+        if (type == "AdVideo") {
+            query = "match (a:AdVideo { mpd: $uuid}) set a += { profanityJobId: $profanityJobId, status: 'waiting;0' } return a";
+        }
         let params = { uuid: uuid, profanityJobId: job };
         return session.run(query, params)
             .then((record) => {

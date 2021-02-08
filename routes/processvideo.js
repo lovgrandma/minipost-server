@@ -304,21 +304,36 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
             return "";
         }
     }
-    let videoRecord = await Video.findOneAndUpdate({ _id: generatedUuid }, {$set: { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) }}, { new: true });
+    let createVideoData = { mpd: mpdLoc, locations: objLocations, state: Date.parse(new Date) };
+    if (job.data.advertisement) {
+        createVideoData.advertisement = true;
+    }
+    let videoRecord = await Video.findOneAndUpdate({ _id: generatedUuid }, {$set: createVideoData }, { new: true });
     if (await videoRecord) {
         let mpd;
         if (videoRecord.mpd) mpd = videoRecord.mpd;
         let userObj = await User.findOne({ username: body.user });
         for (let i = 0; i < userObj.videos.length; i++) {
-            if (userObj.videos[i].id == generatedUuid) {
+            if (userObj.videos[i].id == generatedUuid) { // Go through all of users videos and find the match for this video
                 // Updates user record based on whether or not video document is waiting for info (has a title) or not.
-                let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }}}, { upsert: true, new: true});
+                let updateRec = { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord) }};
+                if (job.data.advertisement) {
+                    updateRec = { "videos.$" : {id: generatedUuid, state: Date.parse(new Date).toString() + awaitingInfo(videoRecord), advertisement: true }};
+                }
+                let userVideoRecord = await User.findOneAndUpdate({ username: body.user, "videos.id": generatedUuid }, {$set: updateRec }, { upsert: true, new: true});
                 if (await userVideoRecord) {
-                    // const createOneVideo = async (user, userUuid, mpd, title, description, nudity, tags, publishDate, responseTo, responseType) => {
                     let userUuid = await User.findOne({ username: body.user }).then((user) => { return user._id });
-                    neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null)
+                    let advertisement = null;
+                    if (job.data.advertisement) {
+                        advertisement = job.data.advertisement;
+                    }
+                    neo.createOneVideo(body.user, userUuid, generatedUuid, null, null, null, null, null, null, null, null, advertisement, null)
                         .then((data) => {
-                            return profanityCheck(videoCheck, generatedUuid); // Set profanity check job after record is created on neo
+                            if (advertisement) {
+                                return profanityCheck(videoCheck, generatedUuid, "AdVideo"); // Set profanity check job after ad record is created on neo
+                            } else {
+                                return profanityCheck(videoCheck, generatedUuid); // Set profanity check job after record is created on neo
+                            }
                         })
                         .then((data) => {
                             return neo.updateChannelNotifications(userUuid, generatedUuid, "video");
@@ -335,7 +350,7 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
 }
 
 // This sends a request to amazon web services to start the content moderation service on the video uploaded to the bucket.
-const profanityCheck = async (record, generatedUuid) => {
+const profanityCheck = async (record, generatedUuid, advertisement = null) => {
     const roleArnId = s3Cred.awsConfig.roleArnId;
     const snsTopicArnId = s3Cred.awsConfig.snsTopicArnId;
     const params = {
@@ -358,7 +373,7 @@ const profanityCheck = async (record, generatedUuid) => {
         }
         if (data) {
             let jobId = data.JobId;
-            return neo.setProfanityCheck(generatedUuid, jobId); // Sets profanity check reference on neo object to check later for job completion
+            return neo.setProfanityCheck(generatedUuid, jobId, null, advertisement); // Sets profanity check reference on neo object to check later for job completion
         }
     });
 }

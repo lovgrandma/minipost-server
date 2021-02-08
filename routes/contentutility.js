@@ -11,6 +11,10 @@ const removeInvalidVideos = async (graphRecords) => {
                     if (record._fields[0].properties) {
                         if (!record._fields[0].properties.title || !record._fields[0].properties.published) {
                             graphRecords.splice(i, 1);
+                        } else if (record._fields[0].properties.publishDate) {
+                            if (record._fields[0].properties.publishDate.toNumber) {
+                                record._fields[0].properties.publishDate = record._fields[0].properties.publishDate.toNumber();
+                            }
                         }
                     }
                 }
@@ -32,7 +36,7 @@ const removeBadVideos = async (graphRecords, field = 0, profile) => {
                     resolve({profanity: 0, status: 'null', jobId: '' }); // is type relationship, iterate through and ignore
                 } else if (record._fields[field].properties.id) { // is type article, good (for now)
                     resolve({profanity: 0, status: 'good', jobId: record._fields[field].properties.profanityJobId });
-                } else if (!record._fields[field].properties.status) {
+                } else if (!record._fields[field].properties.status) { // no status, something is wrong with this record
                     resolve({profanity: 1, status: 'bad', jobId: record._fields[field].properties.profanityJobId });
                 } else if (record._fields[field].properties.status != 'good') {
                     if (record._fields[field].properties.profanityJobId == "") {
@@ -43,7 +47,11 @@ const removeBadVideos = async (graphRecords, field = 0, profile) => {
                         let profanityResult = await processprofanity.getProfanityData(record._fields[field].properties.profanityJobId, record._fields[field].properties.status);
                         console.log(profanityResult);
                         if (profanityResult.status == 'bad' || profanityResult.status == 'good') {
-                            quarantine.quarantineVideo(profanityResult, record._fields[field].properties.mpd);
+                            if (record._fields[field].properties.dailyBudget && record._fields[field].properties.mpd) { // is of type video ad 
+                                quarantine.quarantineVideo(profanityResult, record._fields[field].properties.mpd, "AdVideo");
+                            } else {
+                                quarantine.quarantineVideo(profanityResult, record._fields[field].properties.mpd);
+                            }
                         } else if (profanityResult.status == 'in_progress') {
                             quarantine.defer(profanityResult, record._fields[field].properties.mpd, 5); // defer by 5 minutes
                         }
@@ -87,8 +95,6 @@ const appendResponses = (graphRecords) => {
                     if (record._fields[0].properties.mpd === graphRecords[j]._fields[0].properties.mpd) {
                         found++;
                         if (graphRecords[j]._fields[2]) { 
-                            console.log(graphRecords[j]._fields[2].properties.title);
-                            console.log(record._fields[0].properties.title);
                             // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
                             graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
                             graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);
@@ -108,7 +114,6 @@ const appendResponses = (graphRecords) => {
                     if (record._fields[0].properties.id === graphRecords[j]._fields[0].properties.id) {
                         found++;
                         if (graphRecords[j]._fields[2]) {
-                            console.log(record._fields[0].properties.title);
                             // Convert all relevant integer fields to correct form. Converts {low: 0, high: 0} form to 0. Push object to array
                             graphRecords[j]._fields[2].properties.likes = parseInt(graphRecords[j]._fields[2].properties.likes);
                             graphRecords[j]._fields[2].properties.dislikes = parseInt(graphRecords[j]._fields[2].properties.dislikes);

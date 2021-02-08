@@ -48,6 +48,10 @@ const UserSchema = new mongoose.Schema({
         type: String,
         required: false,
     },
+    advertiser: {
+        type: String,
+        required: false
+    },
     chats: {
         type: Array,
         required: true,

@@ -5,16 +5,22 @@ const driver = neo4j.driver(s3Cred.neo.address, neo4j.auth.basic(s3Cred.neo.user
 
 "CALL db.index.fulltext.createNodeIndex(\"goodVideos\",[\"gVideo\"],[\"title\", \"description\", \"author\", \"tags\", \"mpd\", \"thumbnailUrl\", \"views\", \"publishDate\"])";
 
-const quarantineVideo = async (profanityJob, uuid) => {
+const quarantineVideo = async (profanityJob, uuid, type = "Video") => {
     let session = driver.session();
     let status = profanityJob.status;
     if (uuid) {
         let query = "match (a:Video { mpd: $uuid}) set a += { status: $status } return a";
+        if (type == "AdVideo") {
+            query = "match (a:AdVideo { mpd: $uuid}) set a += { status: $status } return a";
+        }
         let params = { uuid: uuid, status: status };
         return session.run(query, params)
             .then((record) => {
                 if (status == 'good') {
                     let changeLabelQuery = 'match (a:Video {mpd: $uuid}) call apoc.create.addLabels(a, [\"gVideo\"]) yield node return a'; 
+                    if (type == "AdVideo") {
+                        changeLabelQuery = 'match (a:AdVideo {mpd: $uuid}) call apoc.create.addLabels(a, [\"gAdVideo\"]) yield node return a'; 
+                    }
                     let session2 = driver.session();
                     return session2.run(changeLabelQuery, params)
                         .then((result) => {

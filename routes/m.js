@@ -31,6 +31,7 @@ const payment = require('./payment.js');
 const processimage = require('./processimage.js');
 const { badLabels } = require('./processprofanity.js');
 const { deleteOne } = require('./utility.js');
+const playlist = require('./playlist.js');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 maintenance.queueMaintenance(videoQueue);
@@ -96,9 +97,6 @@ module.exports = function(io) {
         }
     })
     
-    setInterval(() => {
-        receiveMessages(sqsQueue);
-    }, 2500000);
     videoQueue.process(CPUs, async function(job, done) {
         videoQueue.on('progress', async function(progress) {
             if (progress._progress.match(/video ready/)) {
@@ -108,7 +106,6 @@ module.exports = function(io) {
                 }
             }
         });
-
         return processvideo.convertVideos(job.data.i, job.data.originalVideo, job.data.objUrls, job.data.generatedUuid, job.data.encodeAudio, job.data.room, job.data.body, job.data.userSocket, job);
     });
 
@@ -190,6 +187,10 @@ module.exports = function(io) {
             let currentlyProcessing = false;
             let room = "";
             let userSocket = body.socket;
+            let advertisement = false;
+            if (body.advertisement) {
+                advertisement = true;
+            }
             console.log(req.body);
             if (userDbObject) { // Determines if video object has been recently processed. Useful for double post requests made by browser
                 for (video of userDbObject.videos) {
@@ -261,13 +262,17 @@ module.exports = function(io) {
                                                     id: generatedUuid,
                                                     state: status
                                                 }
+                                                if (advertisement) {
+                                                    videoData.advertisement = true;
+                                                    videoRef.advertisement = true;
+                                                }
                                                 let createdVideoObj = await Video.create(videoData);
                                                 if (createdVideoObj) {
                                                     let userObj = await User.findOneAndUpdate({ username: body.user }, {$addToSet: { "videos": videoRef }}, {upsert: true, new: true});
                                                     if (userObj) {
                                                         res.status(200).send({querystatus: "processbegin;" + room}); // Send room back to user so user can connect to socket
                                                         ranOnce = true;
-                                                        const job = await videoQueue.add({
+                                                        let jobData = {
                                                             i: i,
                                                             originalVideo: originalVideo,
                                                             objUrls: objUrls,
@@ -276,7 +281,13 @@ module.exports = function(io) {
                                                             room: room,
                                                             body: body,
                                                             userSocket: userSocket
-                                                        }, {
+                                                        }
+                                                        if (advertisement) {
+                                                            jobData.advertisement = true;
+                                                        }
+                                                        const job = await videoQueue.add(
+                                                            jobData
+                                                        ,{
                                                             removeOnComplete: true,
                                                             removeOnFail: true,
                                                             timeout: 7200000,
@@ -348,10 +359,27 @@ module.exports = function(io) {
                     }
                     if (videoRecord && userRecord) {
                         let publishDate = new Date().toLocaleString();
-                        Video.findOneAndUpdate({ _id: req.body.mpd}, {$set: { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags }}, { new: true }, async(err, result) => {
+                        publishDate = Date.parse(publishDate);
+                        let updateVideoRecord = { "title": req.body.title, "published": publishDate, "description": desc, "nudityfound": nudity, "tags" : tags };
+                        if (req.body.startDate && req.body.endDate && req.body.dailyBudget) {
+                            updateVideoRecord.advertisement = true;
+                        }
+                        Video.findOneAndUpdate({ _id: req.body.mpd}, { $set: updateVideoRecord }, { new: true }, async(err, result) => {
                             let userUpdated;
-                            let graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType, serverThumbnailUrl, null);
+                            let graphRecordUpdated;
+                            if (req.body.startDate && req.body.endDate && req.body.dailyBudget && req.body.adUrl) {
+                                let adData = {
+                                    startDate: req.body.startDate,
+                                    endDate: req.body.endDate,
+                                    dailyBudget: req.body.dailyBudget,
+                                    adUrl: req.body.adUrl
+                                }
+                                graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType, serverThumbnailUrl, true, adData);
+                            } else {
+                                graphRecordUpdated = await neo.createOneVideo(req.body.user, userRecord._id, req.body.mpd, req.body.title, desc, nudity, tags, publishDate, responseTo, responseType, serverThumbnailUrl);
+                            }
                             let mpd = "";
+                            console.log(graphRecordUpdated.records);
                             if (graphRecordUpdated.records) {
                                 if (graphRecordUpdated.records[0]) {
                                     if (graphRecordUpdated.records[0]._fields) {
@@ -1222,7 +1250,7 @@ module.exports = function(io) {
 
     //
     const getUserVideos = (req, res, next) => {
-        User.findOne({username: req.body.username}, {username: 1, videos: 1} , async function(err, result) {
+        User.findOne({username: req.body.username}, {username: 1, videos: 1, advertiser: 1} , async function(err, result) {
             if (err) throw err;
             let pendingVideo = false;
             let responded = false;
@@ -1247,7 +1275,17 @@ module.exports = function(io) {
                                     videoData.tags.forEach((node) => {
                                         tagArr = tagArr.concat(node.split(","));
                                     });
-                                    return res.json({ querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: tagArr  });
+                                    let returnObject =  { querystatus: video.id + ";processing", title: videoData.title, description: videoData.description, tags: tagArr  };
+                                    if (result.advertiser) {
+                                        returnObject.advertiser = result.advertiser;
+                                    }
+                                    if (video.advertisement) {
+                                        if (video.mpd) {
+                                            returnObject.adObj = await neo.fetchSingleVideoData(video.mpd, req.body.username, true);
+                                        }
+                                        returnObject.advertisement = true;
+                                    }
+                                    return res.json(returnObject);
                                 }
                                 break;
                             }
@@ -1256,7 +1294,17 @@ module.exports = function(io) {
                                 let videoNeedsInfo = await Video.findOne({ _id: video.id }).lean();
                                 pendingVideo = true;
                                 responded = true;
-                                return res.json({ querystatus: cloudfrontconfig.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" });
+                                let returnObject = { querystatus: cloudfrontconfig.serveCloudfrontUrl(videoNeedsInfo.mpd) + ";awaitinginfo" };
+                                if (result.advertiser) {
+                                    returnObject.advertiser = result.advertiser;
+                                }
+                                if (video.advertisement) {
+                                    if (video.mpd) {
+                                        returnObject.adObj = await neo.fetchSingleVideoData(video.mpd, req.body.username, true);
+                                    }
+                                    returnObject.advertisement = true;
+                                }
+                                return res.json(returnObject);
                                 break;
                             }
                         }
@@ -1266,9 +1314,18 @@ module.exports = function(io) {
                 return res.json({ querystatus: "error: Did not complete check for getUserVideos" });
             }
             if (!pendingVideo && !responded) {
-                return res.json({ querystatus: "no pending videos" });
+                let returnObject = { querystatus: "no pending videos" };
+                if (result.advertiser) {
+                    returnObject.advertiser = result.advertiser;
+                }
+                return res.json(returnObject);
             }
         }).lean();
+    }
+    
+    const getSingleAd = async (req, res, next) => {
+        const data = await neo.fetchSingleVideoData(req.body.mpd, req.body.user, true);
+        return res.json(data);
     }
 
     /* Gets cloudfront url when provided raw mpd without cloud address
@@ -1284,7 +1341,7 @@ module.exports = function(io) {
 
     // Fetches page data for single video page
     const fetchVideoPageData = async (req, res, next) => {
-        return res.json(await neo.fetchSingleVideoData(req.body.rawMpd, req.body.user ));
+        return res.json(await neo.fetchSingleVideoData(req.body.rawMpd, req.body.user, req.body.ad ));
     }
 
     // Fetches page data for single article page
@@ -1575,7 +1632,8 @@ module.exports = function(io) {
     /** Increments view of single video */
     const incrementView = async (req, res, next) => {
         if (req.body.mpd) {
-            let viewRecorded = await neo.incrementContentViewRead(req.body.mpd, req.body.user, "video");
+            console.log(req.body);
+            let viewRecorded = await neo.incrementContentViewRead(req.body.mpd, req.body.user, "video", req.body.ad);
             if (viewRecorded) {
                 return res.json(true);
             }
@@ -1615,12 +1673,16 @@ module.exports = function(io) {
     }
     
     const getClientSecret = async (req, res, next) => {
-        let userPayment = await User.findOne({username:req.body.user}).lean();
+        let userPayment = await User.findOne({ username: req.body.user }).lean();
         if (userPayment) {
-            return res.json(await payment.sendIntentSetupToClient(userPayment.payment));
+            return res.json(await payment.sendIntentSetupToClient(userPayment));
         } else {
             return res.json(false);
         }
+    }
+    
+    const associateCardWithCustomer = async (req, res, next) => {
+        return res.json(await payment.attachCardCustomer(req.body.payment_id, req.body.cus_id));
     }
     
     const fetchProfileOptionsData = async (req, res, next) => {
@@ -1666,8 +1728,17 @@ module.exports = function(io) {
     }
 
     const deleteOneVideo = async (req, res, next) => {
-        let neoRecord = await neo.deleteOneVideo(req.body.id); // Delete record and relationships on neo4j
-        let thumbnailUrl = neoRecord.records[0]._fields[0]; // Get thumbnail name
+        let neoRecord = await neo.deleteOneVideo(req.body.id, req.body.ad); // Delete record and relationships on neo4j
+        let thumbnailUrl;
+        if (neoRecord.records) {
+            if (neoRecord.records[0]) {
+                if (neoRecord.records[0]._fields) {
+                    if (neoRecord.records[0]._fields[0]) {
+                        thumbnailUrl = neoRecord.records[0]._fields[0];
+                    }
+                }
+            }
+        }
         let document = await Video.findOneAndDelete({ _id: req.body.id}).lean(); // Get document on mongo and delete
         if (document) {
             // Remove record copy from array on user record
@@ -1695,14 +1766,16 @@ module.exports = function(io) {
 
                 });
             }
-            let params2 = {
-                Bucket: "minifs-thumbnails",
-                Key: thumbnailUrl + ".jpeg"
+            if (thumbnailUrl) { // Optional delete thumbnail. Record may not have a thumbnail
+                let params2 = {
+                    Bucket: "minifs-thumbnails",
+                    Key: thumbnailUrl + ".jpeg"
+                }
+                s3.deleteObject(params2, function(err, data) {
+                    if (err) console.log(err, err.stack); // an error occurred
+                    // successful response
+                });
             }
-            s3.deleteObject(params2, function(err, data) {
-                if (err) console.log(err, err.stack); // an error occurred
-                // successful response
-            });
             return res.json(true);
         } else {
             return res.json(false);
@@ -1791,6 +1864,13 @@ module.exports = function(io) {
             }
         } catch (err) {
             return res.json(err);
+        }
+    }
+    
+    const buildPlaylist = async(req, res, next) => {
+        // either property can be null as users not logged in can still get a playlist. Do not allow for now as to reduce calls to backend from non monetized users
+        if (req.body.hasOwnProperty('user') && req.body.hasOwnProperty('append')) { 
+            return res.json(await playlist.buildPlaylist(req.body.user, req.body.append));
         }
     }
 
@@ -1943,6 +2023,18 @@ module.exports = function(io) {
     
     router.post('/getclientsecret', (req, res, next) => {
         return getClientSecret(req, res, next);
+    })
+    
+    router.post('/associatecardwithcustomer', (req, res, next) => {
+        return associateCardWithCustomer(req, res, next);
+    })
+    
+    router.post('/getsinglead', (req, res, next) => {
+        return getSingleAd(req, res, next);
+    })
+    
+    router.post('/buildplaylist', (req, res, next) => {
+        return buildPlaylist(req, res, next);
     })
     
     // GET a users profile
