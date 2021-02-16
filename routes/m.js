@@ -17,7 +17,6 @@ const Bull = require('bull');
 
 const redisApp = require('../redis');
 const redisclient = redisApp.redisclient;
-const redisvideoclient = redisApp.redisvideoclient;
 const User = require('../models/user');
 const Chat = require('../models/chat');
 const Video = require('../models/video');
@@ -57,20 +56,6 @@ module.exports = function(io) {
         process.env.PRIVATE_KEY
     );
 
-//    let modparam = {
-//        JobId: 'e20685dd74bbb42f1fb84c229a211e252b8731ae0ac09de171036deb228a34e1'
-//    }
-//    rekognition.getContentModeration(modparam, async (err, data) => {
-//        if (!err) {
-//            if (data) {
-//                if (data.ModerationLabels) {
-//                    data.ModerationLabels.forEach((label) => {
-//                        console.log(label);
-//                    })
-//                }
-//            }
-//        } 
-//    });
     /* Uploads single video or image or file to temporary storage to be used to check if video is viable for converting */
     const uploadCheck = multer({
         storage: multer.diskStorage({
@@ -1195,8 +1180,7 @@ module.exports = function(io) {
     // Only returns to another method
     const getconversationlogs = async (req, res, next) => {
         let chatsArray = [];
-        let user = await User.findOne({username: req.body.username}, {chats: 1});
-
+        let user = await User.findOne({username: req.body.username}, {chats: 1}).lean();
         async function getChats(chatsArray) {
             if (user) { // If no result, there was an error in finding the user. Return empty array.
                 if (user.chats[0]) {
@@ -1205,9 +1189,10 @@ module.exports = function(io) {
                         if (chatdata) {
                             chatdata.pending = "false";
                             chatsArray.push(chatdata);
-                            return chatsArray;
+                            // return chatsArray;
                         }
                     }
+                    return chatsArray;
                 }
             }
             return chatsArray;
@@ -1222,9 +1207,9 @@ module.exports = function(io) {
                         if (chatdata) {
                             chatdata.pending = "true";
                             chatsArray.push(chatdata);
-                            return chatsArray;
                         }
                     }
+                    return chatsArray;
                 }
             }
             return chatsArray;
@@ -1394,7 +1379,8 @@ module.exports = function(io) {
     // If friends, chat exists, forward chat message to chat document
     // If not friends, chat doesnt exist, then create chat make chat pending for other user
     // If not friends, chat exists, forward chat message to chat document, if chat in pending array take chat off pending, put into confirmed.
-    // This will fire if redis fails, otherwise redis will handle chat functionality (live)
+    // This will NOT fire if redis fails, redis now handles majority of chat functionality. This only sets up chat functionality record in mongo.
+    // Chat will rely on redis records for actual logs and functionality
     const beginchat = (req, res, next) => {
         let booleans = [];
         let chatdata;
@@ -1499,7 +1485,7 @@ module.exports = function(io) {
                             timestamp: new Date().toLocaleString(),
                         }
 
-                        if (booleans[2].chatlisted === 'pending') {
+                        if (booleans[2].chatlisted === 'pending') { // May still fire if user sends chat message request and have not gotten new chat records from db
                             // Listed on pending list, but wants to send chat thus making it confirmed. Send chat message to already created chat in db
                             console.log('take off pending list');
                             console.log(chatdata._id)
@@ -1514,28 +1500,28 @@ module.exports = function(io) {
                                                       {$push: { "chats.0.confirmed": chatdata._id}},
                                                       {upsert: true,
                                                        new: true},
-                                                      function(err, result) {
+                                                      async function(err, result) {
                                     if (err) throw err;
                                     // send chat
-                                    Chat.findOneAndUpdate({_id: chatdata._id},
-                                                          {$push: { "log": chatinfo}},
-                                                          {upsert: true,
-                                                           new: true},
-                                                          function(err, result) {
-                                        if (err) throw err;
-                                        res.json(result);
-                                    }).lean();
+                                    let temp = await redisclient.getAsync(chatdata._id); 
+                                    temp = await JSON.parse(temp);
+                                    temp.log.push(chatinfo); // appends value to temporary chat object
+                                    if (temp.log.length > 1000) {
+                                        temp.log.shift();
+                                    }
+                                    redisclient.set(chatdata._id, JSON.stringify(temp));
+                                    res.json(temp);
                                 }).lean();
                             }).lean();
                         } else if (booleans[2].chatlisted === 'confirmed') { // Chat is already created, listed as confirmed, send chat to db
-                            Chat.findOneAndUpdate({_id: chatdata._id},
-                                                  {$push: { "log": chatinfo}},
-                                                  {upsert: true,
-                                                   new: true},
-                                                  function(err, result) {
-                                if (err) throw err;
-                                res.json(result);
-                            }).lean();
+                            let temp = await redisclient.getAsync(chatdata._id); 
+                            temp = await JSON.parse(temp);
+                            temp.log.push(chatinfo); // appends value to temporary chat object
+                            if (temp.log.length > 1000) {
+                                temp.log.shift();
+                            }
+                            redisclient.set(chatdata._id, JSON.stringify(temp));
+                            res.json(temp);
                         } else {
                             // This logic will most likely never occur
                             res.json({querystatus: 'You don\'t belong to this chat'});
@@ -1558,13 +1544,6 @@ module.exports = function(io) {
                                 host: req.body.username,
                                 users: [
                                     req.body.username, req.body.chatwith
-                                ],
-                                log: [
-                                    {
-                                        author: req.body.username,
-                                        content: chatmessage, // chat to append
-                                        timestamp: new Date().toLocaleString(),
-                                    },
                                 ]
                             };
 
@@ -1573,6 +1552,14 @@ module.exports = function(io) {
                                     console.log('error creating new chat');
                                     return next(error);
                                 } else {
+                                    chatinfo.log = [
+                                        {
+                                            author: req.body.username,
+                                            content: chatmessage,
+                                            timestamp: new Date().toLocaleString()
+                                        }
+                                    ]
+                                    redisclient.set(temp, JSON.stringify(chatinfo));
                                     // add chat to users confirmed list.
                                     User.findOneAndUpdate({username: req.body.username}, {$addToSet: { "chats.0.confirmed": chat._id}}, {upsert: true, new: true}, function(err, result) {
                                         if (err) throw err;
@@ -1633,12 +1620,31 @@ module.exports = function(io) {
     const incrementView = async (req, res, next) => {
         if (req.body.mpd) {
             console.log(req.body);
-            let viewRecorded = await neo.incrementContentViewRead(req.body.mpd, req.body.user, "video", req.body.ad);
-            if (viewRecorded) {
-                return res.json(true);
+            let viewRecorded;
+            if (!req.body.adBudget || !req.body.startDate || !req.body.endDate || !req.body.ad) {
+                viewRecorded = await neo.incrementContentViewRead(req.body.mpd, req.body.user, "video", req.body.ad);
+            } else {
+                viewRecorded = await neo.incrementContentViewRead(req.body.mpd, req.body.user, "video", req.body.ad, req.body.adBudget, req.body.startDate, req.body.endDate);
             }
+            return res.json(viewRecorded);
         }
         return res.json(false);
+    }
+    
+    /** Increments view of single video */
+    const incrementClick = async (req, res, next) => {
+        if (req.body.mpd) {
+            console.log(req.body);
+            let viewRecorded;
+            if (req.body.user && req.body.adBudget && req.body.startDate && req.body.endDate && req.body.ad) {
+                viewRecorded = await neo.incrementContentClick(req.body.mpd, req.body.user, "video", req.body.ad, req.body.adBudget, req.body.startDate, req.body.endDate);
+                return res.json(viewRecorded);
+            } else {
+                return res.json(viewRecorded);
+            }
+        } else {
+            return res.json(false); 
+        }
     }
     
     const incrementRead = async (req, res, next) => {
@@ -1843,7 +1849,6 @@ module.exports = function(io) {
                                 if (data.avatarurl) {
                                     let updateMongoUser = await User.findOneAndUpdate({ username: user}, { avatarurl: data.avatarurl }, { new: true }).lean();
                                     if (updateMongoUser) {
-                                        console.log(updateMongoUser);
                                         return data;
                                     } else {
                                         return 'err';
@@ -1987,6 +1992,10 @@ module.exports = function(io) {
     router.post('/incrementview', (req, res, next) => {
         return incrementView(req, res, next);
     });
+    
+    router.post('/incrementclick', (req, res, next) => {
+        return incrementClick(req, res, next);
+    })
     
     router.post('/incrementread', (req, res, next) => {
         return incrementRead(req, res, next);

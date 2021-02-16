@@ -9,6 +9,11 @@ const bluebird = require('bluebird'); // Allows promisfying of redis calls, impo
 bluebird.promisifyAll(redis);
 const redisclient = redisapp.redisclient;
 const rediscontentclient = redisapp.rediscontentclient;
+const videoviewsclient = redisapp.videoviewsclient;
+const articlereadsclient = redisapp.articlereadsclient;
+const adviewsclient = redisapp.adviewsclient;
+const dailyadlimitsclient = redisapp.dailyadlimitsclient;
+const channelsubscriptionsclient = redisapp.channelsubscriptionsclient;
 
 const util = require('util');
 const path = require('path');
@@ -208,6 +213,11 @@ const getHighestRelatedOnContent = async (id, type, paginate) => {
                 data.records[i]._fields[0].properties.reads = data.records[i]._fields[0].properties.reads.low;
             }
         }
+        if (data.records[i]._fields[0].properties.publishDate) {
+            if (data.records[i]._fields[0].properties.publishDate.toNumber) {
+                data.records[i]._fields[0].properties.publishDate = data.records[i]._fields[0].properties.publishDate.toNumber();
+            }
+        }
     }
     return data;
 }
@@ -247,7 +257,6 @@ const getRelevantPlaylist = async (user, append) => {
                         }
                     }
                 }
-                console.log(record._fields[0].properties.title);
             })
             if (result.records.length == 0) {
                 return 'defer';
@@ -283,6 +292,11 @@ const getRelevantAds = async (user) => {
                                     record._fields[0].properties.clicks = record._fields[0].properties.clicks.toNumber();
                                 }
                             }
+                            if (record._fields[0].properties.publishDate) {
+                                if (record._fields[0].properties.publishDate.toNumber) {
+                                    record._fields[0].properties.publishDate = record._fields[0].properties.publishDate.toNumber();
+                                }
+                            }
                         }
                     }
                 }
@@ -306,21 +320,269 @@ const getRelevantAds = async (user) => {
                                         record._fields[0].properties.clicks = record._fields[0].properties.clicks.toNumber();
                                     }
                                 }
+                                if (record._fields[0].properties.publishDate) {
+                                    if (record._fields[0].properties.publishDate.toNumber) {
+                                        record._fields[0].properties.publishDate = record._fields[0].properties.publishDate.toNumber();
+                                    }
+                                }
                             }
                         }
                     }
                 });
-                return result.records = result.records.concat(genericAds.records);
+                // For each record make sure to check redis if ads have hit their limits. If ads hit their daily limit, exclude 
+                
+                result.records = result.records.concat(genericAds.records);
+                return await checkValidAds(result.records);
             } else {
-                return result.records;
+                return await checkValidAds(result.records);
             }
         })
     return [];
 }
 
+// Daily budget string hashes follow this format 00/00/0000 : views;clicks;dailyBudget;dailyCurrentTotal;startDate;endDate
+// This will ingest ad records to be sent to the user. Determine if they have hit their daily limits and spit out ads that are still under their $$$ limit
+const checkValidAds = async(records = []) => {
+    let getSingleRecord = async (record) => {
+        return await new Promise(async (resolve, reject) => {
+            dailyadlimitsclient.hgetall(record._fields[0].properties.mpd, (err, value) => { // check to see if document exists
+                if (!err) {
+                    resolve(value);
+                }
+                reject("failed, do not update");
+            });
+        })
+    };
+    let getDailyBudgetAll = records.map(record => {
+        return new Promise(async (resolve, reject) => {
+            if (record._fields) {
+                if (record._fields[0]) {
+                    if (record._fields[0].properties) {
+                        if (record._fields[0].properties.mpd && record._fields[0].properties.dailyBudget && record._fields[0].properties.startDate && record._fields[0].properties.endDate) {
+                            let redisRecord = await getSingleRecord(record);
+                            if (redisRecord == "failed, do not update") {
+                                reject(null);
+                            } else {
+                                try {
+                                    if (redisRecord) {
+                                        // run method to get current days in the month to cycle through each day in month
+                                        let currentMonth = new Date().getMonth() + 1;
+                                        let currentYear = new Date().getFullYear();
+                                        let currentDate = new Date().getDate();
+                                        // Now we can check if we are within the timeline of the ads campaign time
+                                        let startDate = new Date(parseInt(record._fields[0].properties.startDate)).getTime();
+                                        let endDate = new Date(parseInt(record._fields[0].properties.endDate)).getTime();
+                                        let now = new Date();
+                                        now.setHours(24); // This signifies that ad will run at start of startDate and before the endDate begins.
+                                        now = now.getTime();
+                                        if (now > startDate && now < endDate) { // This confirms we are within the time of the ad campaign. Lets see if the daily budget has been hit
+                                            let matchClicks = currentMonth + "/" + currentDate + "/" + currentYear + "-c";
+                                            let matchViews = currentMonth + "/" + currentDate + "/" + currentYear + "-v";
+                                            let clicks = 0;
+                                            let views = 0;
+                                            Object.keys(redisRecord).map(key => {
+                                                console.log(redisRecord);
+                                                if (key == matchClicks) {
+                                                    clicks = redisRecord[key];
+                                                }
+                                                if (key == matchViews) {
+                                                    views = redisRecord[key];
+                                                }
+                                            })
+                                            let dailyBudget = record._fields[0].properties.dailyBudget;
+                                            let daysCostOfViews = parseInt(views) * 0.03; // USD
+                                            let daysCostOfClicks = parseInt(clicks) * 0.15; // USD
+                                            let currentDailyCost = daysCostOfClicks + daysCostOfViews;
+                                            console.log(views, clicks, currentDailyCost, dailyBudget);
+                                            if (currentDailyCost < dailyBudget) { // if the ad is under the budget for the day, return the ad to the user to watch
+                                                resolve(record);
+                                            } else {
+                                                resolve(null);
+                                            }
+                                        } else {
+                                            resolve(null);
+                                        }
+                                        resolve(record);
+                                    } else {
+                                        let date = new Date();
+                                        let formattedDate = (date.getMonth() + 1) + "/" + date.getDate() + "/" + date.getFullYear();
+                                        dailyadlimitsclient.hmset(record._fields[0].properties.mpd, formattedDate + "-c", 0, formattedDate + "-v", 0);
+                                        resolve(record);
+                                    }
+                                } catch (err) {
+                                    console.log(err);
+                                    resolve(null);
+                                }
+                            }
+                        } else {
+                            resolve(null);
+                        }
+                    } else {
+                        resolve(null);
+                    }
+                } else {
+                    resolve(null);
+                }
+            } else {
+                resolve(null);
+            }                                  
+        });
+    });
+    records = await Promise.all(getDailyBudgetAll);
+    for (let i = 0; i < records.length; i++) {
+        if (!records[i]) {
+            records.splice(i, 1);
+            i--;
+        }
+    }
+    return records;
+}
+
+const getDaysInMonth = function(month, year) {
+    return new Date(year, month, 0).getDate();
+}
+
+// Only runs for ads
+const incrementDailyBudgetRecord = async(id, type = "view", adBudget, startDate, endDate) => {
+    try {
+        let contentExists;
+        let redisAccessible = await new Promise(async (resolve, reject) => {
+            dailyadlimitsclient.hgetall(id, (err, value) => { // check to see if document exists
+                if (!err) {
+                    contentExists = value;
+                } else {
+                    reject(false);
+                }
+                resolve(true);
+            });  
+        });
+        if (redisAccessible) {
+            if (adBudget && startDate && endDate) {
+                startDate = new Date(parseInt(startDate)).getTime();
+                endDate = new Date(parseInt(endDate)).getTime();
+                if (type == "view") {
+                    let incView = new Promise((resolve, reject) => {
+                        let date = new Date();
+                        let formattedDate = (date.getMonth() + 1) + "/" + date.getDate() + "/" + date.getFullYear();
+                        if (contentExists) {
+                            dailyadlimitsclient.hincrby(id, formattedDate + "-v", 1);
+                            dailyadlimitsclient.hgetall(id, (err, value) => {
+                                if (err) {
+                                    resolve(false);
+                                }
+                                let clicks = 0;
+                                let views = 0;
+                                console.log(value);
+                                Object.keys(value).map(key => {
+                                    if (key == formattedDate + "-c") {
+                                        clicks = value[key];
+                                    }
+                                    if (key == formattedDate + "-v") {
+                                        views = value[key];
+                                    }
+                                })
+                                let daysCostOfViews = parseInt(views) * 0.03; // USD
+                                let daysCostOfClicks = parseInt(clicks) * 0.15; // USD
+                                let currentDailyCost = daysCostOfClicks + daysCostOfViews;
+                                console.log(views, clicks, currentDailyCost, adBudget);
+                                if (currentDailyCost < adBudget) { // if the ad is under the budget for the day, video is good
+                                    resolve(true);
+                                } else {
+                                    resolve(false); // user must request new playlist
+                                }
+                            });
+                        } else {
+                            try {
+                            dailyadlimitsclient.hmset(id, formattedDate + "-c", 0, formattedDate + "-v", 1);
+                                resolve(true);
+                            } catch (err) {
+                                reject(false);
+                            }
+                        }
+                    });
+                    return incView.then((result) => {
+                        console.log(result);
+                        return result;
+                    })
+                } else if (type == "click") {
+                    let incView = new Promise((resolve, reject) => {
+                        let date = new Date();
+                        let formattedDate = (date.getMonth() + 1) + "/" + date.getDate() + "/" + date.getFullYear();
+                        if (contentExists) {
+                            dailyadlimitsclient.hincrby(id, formattedDate + "-c", 1);
+                            dailyadlimitsclient.hgetall(id, (err, value) => {
+                                if (err) {
+                                    resolve(false);
+                                }
+                                let clicks = 0; // if no record is found for clicks that means there has been no clicks for the day, multiply by 0
+                                let views = 0; // vice versa
+                                Object.keys(value).map(key => {
+                                    if (key == formattedDate + "-c") {
+                                        clicks = value[key];
+                                    }
+                                    if (key == formattedDate + "-v") {
+                                        views = value[key];
+                                    }
+                                })
+                                let daysCostOfViews = parseInt(views) * 0.03; // USD
+                                let daysCostOfClicks = parseInt(clicks) * 0.15; // USD
+                                let currentDailyCost = daysCostOfClicks + daysCostOfViews;
+                                console.log(views, clicks, currentDailyCost, adBudget);
+                                if (currentDailyCost < adBudget) { // if the ad is under the budget for the day, video is good
+                                    resolve(true);
+                                } else {
+                                    resolve(false); // user must request new playlist
+                                }
+                            });
+                        } else {
+                            try {
+                            dailyadlimitsclient.hmset(id, formattedDate + "-v", 0, formattedDate + "-c", 1);
+                                resolve(true);
+                            } catch (err) {
+                                reject(false);
+                            }
+                        }
+                    });
+                    return incView.then((result) => {
+                        return result;
+                    })
+                } else {
+                    return null;
+                }
+            }
+        } else {
+            return null;
+        }
+    } catch (err) {
+        console.log(err);
+    }
+    
+}
+
+const fetchSingleVideoSimple = async (mpd, ad = false) => {
+    let session = driver.session();
+    let query = "match (a:Video {mpd: $mpd}) return a";
+    if (ad) {
+        query = "match (a:AdVideo {mpd: $mpd}) return a";
+    }
+    let params = { mpd: mpd };
+    return await session.run(query, params)
+        .then(async (result) => {
+            if (result.records) {
+                if (result.records[0]) {
+                    return result.records[0];
+                }
+            }
+            return null;
+        })
+}
+
+
 module.exports = {
     getSearchResults: getSearchResults,
     getRelatedContent: getRelatedContent,
     getRelevantPlaylist: getRelevantPlaylist,
-    getRelevantAds: getRelevantAds
+    getRelevantAds: getRelevantAds,
+    incrementDailyBudgetRecord: incrementDailyBudgetRecord,
+    fetchSingleVideoSimple: fetchSingleVideoSimple
 }

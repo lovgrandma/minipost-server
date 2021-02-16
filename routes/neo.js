@@ -8,8 +8,11 @@ const redisapp = require('../redis');
 const bluebird = require('bluebird'); // Allows promisfying of redis calls, important for simplified returning key-values for redis calls
 bluebird.promisifyAll(redis);
 const redisclient = redisapp.redisclient;
-const rediscontentclient = redisapp.rediscontentclient;
-
+const videoviewsclient = redisapp.videoviewsclient;
+const articlereadsclient = redisapp.articlereadsclient;
+const adviewsclient = redisapp.adviewsclient;
+const dailyadlimitsclient = redisapp.dailyadlimitsclient;
+const channelsubscriptionsclient = redisapp.channelsubscriptionsclient;
 const util = require('util');
 const path = require('path');
 const neo4j = require('neo4j-driver');
@@ -19,6 +22,7 @@ const s3Cred = require('./api/s3credentials.js');
 const driver = neo4j.driver(s3Cred.neo.address, neo4j.auth.basic(s3Cred.neo.username, s3Cred.neo.password));
 const contentutility = require('./contentutility.js');
 const processprofanity = require('./processprofanity.js');
+const recommendations = require('./recommendations.js');
 const utility = require('./utility.js');
 const User = require('../models/user');
 const Chat = require('../models/chat');
@@ -46,7 +50,7 @@ const serveVideoRecommendations = async (user = "", append = []) => {
             // get watched videos of other users that have watched this same video by highest aggreggated watch count )
             // so pass user, watched or unwatched filter to determine if to return watched videos, possibly a history maybe
             if (append.length > 0) {
-                append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user)));
+                append = await removeDuplicates(append.concat(await serveRandomTrendingVideos(user))); // Will retrieve random trending videos, not relating to user watch history
                 if (append.length > 0) {
                     append = append.slice(originalLength, append.length);
                 }
@@ -323,6 +327,9 @@ const checkNodeExists = async (id, type = "video") => {
                         }
                     }
                     return false;
+                })
+                .catch((err) => {
+                    console.log(err);
                 })
             return nodeFound;
         }
@@ -761,10 +768,12 @@ const fetchSingleVideoData = async (mpd, user, ad = false) => {
                             video.title = result.records[0]._fields[0].properties.title.toString();
                             video.description = resolveEmptyData(result.records[0], "description"); // Unrequired data member
                             video.tags = resolveEmptyData(result.records[0], "tags", "array"); // Unrequired data member
-                            if (result.records[0]._fields[0].properties.publishDate.toNumber) {
-                                video.published = result.records[0]._fields[0].properties.publishDate.toNumber();
-                            } else {
-                                video.published = result.records[0]._fields[0].properties.publishDate;
+                            if (result.records[0]._fields[0].properties.publishDate) {
+                                if (result.records[0]._fields[0].properties.publishDate.toNumber) {
+                                    video.published = result.records[0]._fields[0].properties.publishDate.toNumber();
+                                } else {
+                                    video.published = result.records[0]._fields[0].properties.publishDate;
+                                }
                             }
                             if (result.records[0]._fields[0].properties.likes) {
                                 if (result.records[0]._fields[0].properties.likes.toNumber) {
@@ -795,10 +804,12 @@ const fetchSingleVideoData = async (mpd, user, ad = false) => {
                             video.mpd = result.records[0]._fields[0].properties.mpd;
                             video.thumbnail = resolveEmptyData(result.records[0], "thumbnailUrl");
                             if (ad) {
-                                if (result.records[0]._fields[0].properties.startDate && result.records[0]._fields[0].properties.endDate && result.records[0]._fields[0].properties.dailyBudget && result.records[0]._fields[0].properties.adUrl) {
+                                if (result.records[0]._fields[0].properties.startDate && result.records[0]._fields[0].properties.endDate && result.records[0]._fields[0].properties.dailyBudget) {
                                     video.startDate = result.records[0]._fields[0].properties.startDate;
                                     video.endDate = result.records[0]._fields[0].properties.endDate;
                                     video.dailyBudget = result.records[0]._fields[0].properties.dailyBudget;
+                                }
+                                if (result.records[0]._fields[0].properties.adUrl) {
                                     video.adUrl = result.records[0]._fields[0].properties.adUrl;
                                 }
                             }
@@ -988,7 +999,7 @@ const getUserLikedDisliked = async (id, type, user) => {
 }
 
 // Will check for optional already existing WATCHED relationship and delete, then merge new WATCHED relationship with milliseconds since epoch (january 1, 1970)
-const setWatchReadRelationship = async (id, user, type = "video") => {
+const setWatchReadRelationship = async (id, user, type = "video", ad = false) => {
     try {
         const d = new Date().getTime();
         let session = driver.session();
@@ -998,7 +1009,28 @@ const setWatchReadRelationship = async (id, user, type = "video") => {
             query = "match ( a:Person { name: $user }), ( b:Article { id: $id }) optional match (a)-[r:READ]->(b) delete r merge (a)-[r2:READ { time: $ms }]->(b) return a, r2, b";
             params = { user: user, ms: neo4j.int(d), id: id };
         }
+        if (ad) {
+            query = "match ( a:Person { name: $user }), ( b:AdVideo { mpd: $mpd }) optional match (a)-[r:WATCHED]->(b) delete r merge (a)-[r2:WATCHED { time: $ms }]->(b) return a, r2, b";
+        }
         return await session.run(query, params);
+    } catch (err) {
+        return err;
+    }
+    return false;
+}
+
+// Will check for optional already existing WATCHED relationship and delete, then merge new WATCHED relationship with milliseconds since epoch (january 1, 1970)
+const setClickedRelationship = async (id, user, type = "video", ad = false) => {
+    try {
+        const d = new Date().getTime();
+        let session = driver.session();
+        if (ad && type == "video" && id && user) {
+            let query = "match ( a:Person { name: $user }), ( b:AdVideo { mpd: $mpd }) optional match (a)-[r:CLICKED]->(b) delete r merge (a)-[r2:CLICKED { time: $ms }]->(b) return a, r2, b";
+            let params = { user: user, ms: neo4j.int(d), mpd: id };
+            return await session.run(query, params);
+        } else {
+            return false;
+        }
     } catch (err) {
         return err;
     }
@@ -1007,15 +1039,16 @@ const setWatchReadRelationship = async (id, user, type = "video") => {
 
 /** Experimental high frequency increment video views on redis database. Returns boolean
 Accurate and reliable incrementation is maintained in redis, record values are simply copied to neo4j */
-const incrementContentViewRead = async (id, user, type = "video", ad = false) => {
+const incrementContentViewRead = async (id, user, type = "video", ad = false, adBudget = null, startDate = null, endDate = null) => {
     try {
         if (type == "video" || type == "article") {
-            let redisAccessible = true;
-            let db = 1; // Use 1 for videos, 2 for articles
             let marker = "views";
             if (type == "article") {
-                db = 2;
                 marker = "reads";
+            }
+            let goodPlaylist;
+            if (ad && adBudget && startDate && endDate) {
+                goodPlaylist = await recommendations.incrementDailyBudgetRecord(id, "view", adBudget, startDate, endDate);
             }
             let contentExists;
             if (ad && type == "video") {
@@ -1023,62 +1056,109 @@ const incrementContentViewRead = async (id, user, type = "video", ad = false) =>
             } else {
                 contentExists = await checkNodeExists(id, type);
             }
+            let waitForBudgetInc = false;
+            if (ad) {
+                waitForBudgetInc = true;
+            }
+            console.log(ad, contentExists, id, user, type);
             if (contentExists) {
-                let contentExistsRedis = await rediscontentclient.select(db, async function(err, res) {
-                    if (res == "OK") {
-                        return await rediscontentclient.hgetall(id, (err, value) => {
-                            if (!err) {
-                                return value;
-                            }
+                let contentExistsRedis;
+                
+                if (type == "video") {
+                    contentExistsRedis = await videoviewsclient.hgetall(id, (err, value) => {
+                        if (!err) {
+                            return value;
+                        } else {
                             return "failed, do not update";
-                        });
-                    } else {
-                        redisAccessible = false;
-                    }
-                    return false;
-                });
-                if (!redisAccessible) {
-                    return false;
+                        }
+                        return false;
+                    });
+                } else if (type == "article") {
+                    contentExistsRedis = await articlereadsclient.hgetall(id, (err, value) => {
+                        if (!err) {
+                            return value;
+                        } else {
+                            return "failed, do not update";
+                        }
+                    })
                 }
-                return await rediscontentclient.select(db, async function(err, res) {
-                    return await setWatchReadRelationship(id, user, type)
+                console.log(contentExistsRedis);
+                let promise = new Promise(async (resolve, reject) => {
+                    setWatchReadRelationship(id, user, type, ad)
                         .then( async (result) => {
                             if (contentExistsRedis == "failed, do not update") {
-                                return false;
+                                reject(false);
                             } else if (contentExistsRedis) {
-                                rediscontentclient.hincrby(id, marker, 1);
-                                return await rediscontentclient.hgetall(id, (err, value) => {
-                                    console.log(value);
-                                    if (type == "video") {
+                                if (type == "video") {
+                                    videoviewsclient.hincrby(id, marker, 1);
+                                    return await videoviewsclient.hgetall(id, (err, value) => {
+                                        console.log(value);
                                         if (ad) {
                                             setVideoViewsArticleReadsNeo(id, value.views, "video", ad);
                                         } else {
                                             setVideoViewsArticleReadsNeo(id, value.views, "video");
                                         }
-                                    } else {
+                                        console.log("playlist good " + goodPlaylist);
+                                        resolve({ 
+                                            increment: true, 
+                                            playlist: goodPlaylist
+                                        });
+                                    });
+                                } else if (type == "article") {
+                                    articlereadsclient.hincrby(id, marker, 1);
+                                    return await articlereadsclient.hgetall(id, (err, value) => {
+                                        console.log(value);
                                         setVideoViewsArticleReadsNeo(id, value.reads, "article");
-                                    }
-                                    return true;
-                                });
+                                        console.log("playlist good " + goodPlaylist);
+                                        resolve({ 
+                                            increment: true, 
+                                            playlist: goodPlaylist
+                                        });
+                                    });
+                                } else {
+                                    resolve(false);
+                                }
                             } else {
-                                rediscontentclient.hmset(id, marker, 1, "likes", 0, "dislikes", 0);
-                                return await rediscontentclient.hgetall(id, (err, value) => {
-                                    
-                                    if (type == "video") {
+                                if (type == "video") {
+                                    videoviewsclient.hmset(id, marker, 1, "likes", 0, "dislikes", 0);
+                                    return await videoviewsclient.hgetall(id, (err, value) => {
                                         if (ad) {
                                             setVideoViewsArticleReadsNeo(id, value.views, "video", ad);
                                         } else {
                                             setVideoViewsArticleReadsNeo(id, value.views, "video");
                                         }
-                                    } else {
+                                        resolve({ 
+                                            increment: true, 
+                                            playlist: goodPlaylist
+                                        });
+                                    });
+                                } else if (type == "article") {
+                                    articlereadsclient.hmset(id, marker, 1, "likes", 0, "dislikes", 0);
+                                    return await articlereadsclient.hgetall(id, (err, value) => {
                                         setVideoViewsArticleReadsNeo(id, value.reads, "article");
-                                    }
-                                    return true;
-                                });
+                                        resolve({ 
+                                            increment: true, 
+                                            playlist: goodPlaylist
+                                        });
+                                    });
+                                } else {
+                                    resolve(false);
+                                }
                             }
-                        })
+                    })
+                    .catch((err) => {
+                        console.log(err);
+                        reject(err);
+                    });
                 });
+                return promise.then((result) => {
+                    return result;
+                })
+            } else {
+                return false;
             }
+        } else {
+            return false;
         }
     } catch (err) {
         return false;
@@ -1103,26 +1183,16 @@ const getChannelNotifications = async (channels) => {
                             channel: channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[2],
                             notifications: []
                         }
-                        return await rediscontentclient.select(3, async function(err, res) {
-                            if (!redisAccessible) {
-                                reject(null);
-                            }
-                            if (res == "OK") {
-                                return rediscontentclient.get(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[1], (err, value) => {
-                                    if (JSON.parse(value) != null) {
-                                        channelData.notifications = JSON.parse(value);
-                                    }
-                                    data.subscribed.push(channelData);
-                                    resolve(JSON.parse(value));
-                                    if (!err) {
-                                        return value;
-                                    }
-                                    return null;
-                                });
-                            } else {
+                        return channelsubscriptionsclient.get(channel.match(/([a-zA-Z0-9].*);([a-zA-Z0-9].*)/)[1], (err, value) => {
+                            if (err) {
                                 redisAccessible = false;
-                                reject(null);
+                                return null;
                             }
+                            if (JSON.parse(value) != null) {
+                                channelData.notifications = JSON.parse(value);
+                            }
+                            data.subscribed.push(channelData);
+                            resolve(JSON.parse(value));
                         });
                     } else {
                         return null;
@@ -1168,31 +1238,26 @@ const updateChannelNotifications = async(channel, data, type) => {
         }
         let redisAccessible = true;
         return new Promise( async (resolve, reject) => {
-            return await rediscontentclient.select(3, async function(err, res) {
-                if (res == "OK") {
-                    return rediscontentclient.get(channel, (err, value) => {
-                        if (!value) {
-                            rediscontentclient.set(channel, JSON.stringify([data]));
-                            return rediscontentclient.get(channel, (err, value) => {
-                                if (value) {
-                                    value = JSON.parse(value);
-                                    value = appendNotificationArr(value, data);
-                                    rediscontentclient.set(channel, JSON.stringify(value));
-                                    resolve(true);
-                                }
-                            });
-                        } else {
+            return channelsubscriptionsclient.get(channel, (err, value) => {
+                if (!value) { // If no channel subscriptions record for channel, create new to track channels newly created content
+                    channelsubscriptionsclient.set(channel, JSON.stringify([data]));
+                    return channelsubscriptionsclient.get(channel, (err, value) => {
+                        if (err) {
+                            reject(false);
+                        }
+                        if (value) {
                             value = JSON.parse(value);
                             value = appendNotificationArr(value, data);
-                            rediscontentclient.set(channel, JSON.stringify(value));
+                            channelsubscriptionsclient.set(channel, JSON.stringify(value));
                             resolve(true);
                         }
-                        reject(false);
                     });
                 } else {
-                    redisAccessible = false;
+                    value = JSON.parse(value);
+                    value = appendNotificationArr(value, data);
+                    channelsubscriptionsclient.set(channel, JSON.stringify(value));
+                    resolve(true);
                 }
-                reject(false);
             });
         });
     } catch (err) {
@@ -1211,9 +1276,7 @@ const reverseLikeOrDislike = (like) => {
 
 const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanUp) => {
     try {
-        let redisAccesible = true;
         let nodeExists;
-        let db = 1;
         let viewsOrReads = "views";
         let likeOrDislike = "likes";
         if (!like) {
@@ -1221,88 +1284,137 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
         }
         nodeExists = await checkNodeExists(id, type.normalize().toLocaleLowerCase());
         if (type.normalize().toLocaleLowerCase() == "article") {
-            db = 2;
             viewsOrReads = "reads";
         }
+        console.log(type, id, increment, like, user, cleanUp, nodeExists, viewsOrReads);
         if (nodeExists) {
             // Check if node exists in redis database
             let nodeExistsRedis = new Promise((resolve, reject) => {
-                rediscontentclient.select(db, async function(err, res) { // Select article db
-                    if (res == "OK") {
-                        rediscontentclient.hgetall(id, (err, value) => {
-                            console.log(value);
-                            if (value) {
-                                if (value.likes) {
-                                    if (value.likes < 0) {
-                                        rediscontentclient.hmset(id, "likes", 0);
-                                    }
-                                }
-                                if (value.dislikes) {
-                                    if (value.dislikes < 0) {
-                                        rediscontentclient.hmset(id, "dislikes", 0);
-                                    }
+                if (type.normalize().toLocaleLowerCase() == "article") {
+                    articlereadsclient.hgetall(id, (err, value) => {
+                        if (value) {
+                            if (value.likes) {
+                                if (value.likes < 0) {
+                                    articlereadsclient.hmset(id, "likes", 0);
                                 }
                             }
-                            if (err) {
-                                return reject("failed, do not update");
+                            if (value.dislikes) {
+                                if (value.dislikes < 0) {
+                                    articlereadsclient.hmset(id, "dislikes", 0);
+                                }
                             }
-                            return resolve(value);
-                        });
-                    } else {
-                        redisAccesible = false;
-                        return reject(false);
-                    }
-                });
+                        }
+                        if (err) {
+                            return reject("failed, do not update");
+                        }
+                        return resolve(value);
+                    })
+                } else {
+                    videoviewsclient.hgetall(id, (err, value) => {
+                        if (value) {
+                            if (value.likes) {
+                                if (value.likes < 0) {
+                                    videoviewsclient.hmset(id, "likes", 0);
+                                }
+                            }
+                            if (value.dislikes) {
+                                if (value.dislikes < 0) {
+                                    videoviewsclient.hmset(id, "dislikes", 0);
+                                }
+                            }
+                        }
+                        if (err) {
+                            return reject("failed, do not update");
+                        }
+                        return resolve(value);
+                    })
+                }
             })
-            if (!redisAccesible) { // if redis db fails for some reason, simply exit cleanly
-                return false;
-            }
             // rediscontentclient.hgetall(id, (err, value) =>  will return created media of type
             return new Promise((resolve, reject) => {
-                rediscontentclient.select(db, async function(err, res) {
                     nodeExistsRedis
                         .then( async (result) => {
+                            console.log(result);
                             if (result == "failed, do not update") {
                                 return resolve(false);
                             } else if (result) {
                                 if (increment) {
-                                    rediscontentclient.hincrby(id, likeOrDislike, 1);
-                                    if (cleanUp) {
-                                        rediscontentclient.hincrby(id, reverseLikeOrDislike(like), -1);
+                                    if (type.normalize().toLocaleLowerCase() == "article") {
+                                        articlereadsclient.hincrby(id, likeOrDislike, 1);
+                                        if (cleanUp) {
+                                            articlereadsclient.hincrby(id, reverseLikeOrDislike(like), -1);
+                                        }
+                                    } else {
+                                        videoviewsclient.hincrby(id, likeOrDislike, 1);
+                                        if (cleanUp) {
+                                            videoviewsclient.hincrby(id, reverseLikeOrDislike(like), -1);
+                                        }
                                     }
                                 } else {
-                                    rediscontentclient.hincrby(id, likeOrDislike, -1);
-                                }
-                                rediscontentclient.hgetall(id, (err, value) => {
-                                    if (err) {
-                                        return resolve(false);
+                                    if (type.normalize().toLocaleLowerCase() == "article") {
+                                        articlereadsclient.hincrby(id, likeOrDislike, -1);
+                                    } else {
+                                        videoviewsclient.hincrby(id, likeOrDislike, -1);
                                     }
-                                    return resolve(value);
-                                });
+                                }
+                                if (type.normalize().toLocaleLowerCase() == "article") {
+                                    articlereadsclient.hgetall(id, (err, value) => {
+                                        if (err) {
+                                            return resolve(false);
+                                        }
+                                        return resolve(value);
+                                    });
+                                } else {
+                                    videoviewsclient.hgetall(id, (err, value) => {
+                                        if (err) {
+                                            return resolve(false);
+                                        }
+                                        return resolve(value);
+                                    });
+                                }
                             } else {
                                 if (increment) {
                                     if (like) {
-                                        rediscontentclient.hmset(id, viewsOrReads, 1, "likes", 1, "dislikes", 0);
+                                        if (type.normalize().toLocaleLowerCase() == "article") {
+                                            articlereadsclient.hmset(id, viewsOrReads, 1, "likes", 1, "dislikes", 0);
+                                        } else {
+                                            videoviewsclient.hmset(id, viewsOrReads, 1, "likes", 1, "dislikes", 0);
+                                        }
                                     } else {
-                                        rediscontentclient.hmset(id, viewsOrReads, 1, "likes", 0, "dislikes", 1);
+                                        if (type.normalize().toLocaleLowerCase() == "article") {
+                                            articlereadsclient.hmset(id, viewsOrReads, 1, "likes", 0, "dislikes", 1);
+                                        } else {
+                                            videoviewsclient.hmset(id, viewsOrReads, 1, "likes", 0, "dislikes", 1);
+                                        }
+                                    }
+                                    if (type.normalize().toLocaleLowerCase() == "article") {
+                                        articlereadsclient.hgetall(id, (err, value) => {
+                                            if (err) {
+                                                return resolve(false);
+                                            }
+                                            return resolve(value);
+                                        });
+                                    } else {
+                                        videoviewsclient.hgetall(id, (err, value) => {
+                                            if (err) {
+                                                return resolve(false);
+                                            }
+                                            return resolve(value);
+                                        });
                                     }
                                 }
-                                rediscontentclient.hgetall(id, (err, value) => {
-                                    if (err) {
-                                        return resolve(false);
-                                    }
-                                    return resolve(value);
-                                });
                             }
                         })
                         .catch((err) => {
+                            console.log(err);
                             if (err) {
                                 return resolve(false);
                             }
                             return resolve(true);
                         })
-                });
             });
+        } else {
+            return false;
         }
     } catch (err) {
         return false;
@@ -1326,13 +1438,16 @@ const setVideoViewsArticleReadsNeo = async (id, value, type = "video", ad = fals
             }
             return await session.run(query, params)
                 .then((result) => {
-                session.close();
-                if (result) {
-                    return true;
-                } else {
-                    return false;
-                }
-            })
+                    session.close();
+                    if (result) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                })
+                .catch((err) => {
+                    console.log(err);
+                })
         } else {
             return false;
         }
@@ -1559,8 +1674,10 @@ const fetchProfilePageData = async (user, self) => {
                 let params = { user: user };
                 return await session.run(query, params)
                     .then( async (result) => {
+                        console.log(result.records);
                         // Will check videos to see if profanity jobs are complete
                         result.records = await contentutility.removeBadVideos(result.records, 1, self);
+                        console.log(result);
                         return result;
                     }).then( async (result) => {
                         let data = {
@@ -1576,6 +1693,7 @@ const fetchProfilePageData = async (user, self) => {
                             username: "",
                             id: ""
                         }
+                        console.log(records);
                         if (result.records) {
                             if (result.records.length > 0) {
                                 if (result.records[0]._fields) {
@@ -1889,6 +2007,36 @@ const fetchOneUser = async (user) => {
     }
 }
 
+const incrementContentClick = async (id, user, type = "video", ad, adBudget, startDate, endDate) => {
+    try {
+        if (user) {
+            console.log(id, user, ad, adBudget, startDate, endDate);
+            let contentExists;
+            if (ad && adBudget && startDate && endDate) {
+                contentExists = await checkNodeExists(id, "AdVideo");
+                if (contentExists) {
+                    let goodPlaylist = await recommendations.incrementDailyBudgetRecord(id, "click", adBudget, startDate, endDate);
+                    let setClickedRel = await setClickedRelationship(id, user, type, ad);
+                    return { 
+                        increment: true, 
+                        playlist: goodPlaylist 
+                           }
+                    
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    } catch (err) {
+        console.log(err);
+        return false;
+    }
+}
+
 module.exports = {
     checkFriends: checkFriends,
     serveVideoRecommendations: serveVideoRecommendations,
@@ -1909,5 +2057,6 @@ module.exports = {
     updateChannelNotifications: updateChannelNotifications,
     fetchContentData: fetchContentData,
     setProfanityCheck: setProfanityCheck,
-    setUserThumbnail: setUserThumbnail
+    setUserThumbnail: setUserThumbnail,
+    incrementContentClick: incrementContentClick
 };
