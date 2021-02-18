@@ -1,12 +1,12 @@
 {
-  "name": "minireel-may2018",
+  "name": "minipost",
   "version": "1.0.0",
-  "description": "",
+  "description": "An information & entertainment media indexing environment for shared experiences",
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "COWBOY SYSTEMS©",
+  "author": "mini systems©",
   "license": "MIT",
   "dependencies": {
     "aws-sdk": "^2.648.0",
