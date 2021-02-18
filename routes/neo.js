@@ -1674,10 +1674,8 @@ const fetchProfilePageData = async (user, self) => {
                 let params = { user: user };
                 return await session.run(query, params)
                     .then( async (result) => {
-                        console.log(result.records);
                         // Will check videos to see if profanity jobs are complete
                         result.records = await contentutility.removeBadVideos(result.records, 1, self);
-                        console.log(result);
                         return result;
                     }).then( async (result) => {
                         let data = {
@@ -1693,7 +1691,6 @@ const fetchProfilePageData = async (user, self) => {
                             username: "",
                             id: ""
                         }
-                        console.log(records);
                         if (result.records) {
                             if (result.records.length > 0) {
                                 if (result.records[0]._fields) {

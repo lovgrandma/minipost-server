@@ -10,6 +10,7 @@ const Chat = require('./models/chat');
 const lzw = require('./scripts/compression/lzw');
 const { get } = require('./routes/utility.js');
 const neo = require('./routes/neo.js');
+const { incrementDailyBudgetRecord } = require('./routes/recommendations.js');
 
 exports = module.exports = function(io){
 
@@ -297,6 +298,12 @@ exports = module.exports = function(io){
         let requestTogetherSession = (socket, data) => {
             io.to(data.room).emit('promptTogether', data);
         }
+        
+        let recordImpression = (data) => {
+            if (data.id && data.type == "impression" && data.adBudget && data.startDate && data.endDate) {
+                incrementDailyBudgetRecord(data.id, data.type, data.adBudget, data.startDate, data.endDate);
+            }
+        }
 
         socket.on('typing', (data) => {
             updateType(socket, data);
@@ -342,6 +349,10 @@ exports = module.exports = function(io){
         
         socket.on('sendWatch', (data) => {
             io.to(data.room).emit('receiveWatch', data);
+        })
+        
+        socket.on('sendImpression', (data) => {
+            recordImpression(data);
         })
 
         socket.on("disconnect", () => { // Should update mongodb on every disconnect

@@ -472,6 +472,7 @@ const incrementDailyBudgetRecord = async(id, type = "view", adBudget, startDate,
                                 }
                                 let clicks = 0;
                                 let views = 0;
+                                let impressions = 0;
                                 console.log(value);
                                 Object.keys(value).map(key => {
                                     if (key == formattedDate + "-c") {
@@ -480,10 +481,14 @@ const incrementDailyBudgetRecord = async(id, type = "view", adBudget, startDate,
                                     if (key == formattedDate + "-v") {
                                         views = value[key];
                                     }
+                                    if (key == formattedDate + "-i") {
+                                        impressions = value[key];
+                                    }
                                 })
                                 let daysCostOfViews = parseInt(views) * 0.03; // USD
                                 let daysCostOfClicks = parseInt(clicks) * 0.15; // USD
-                                let currentDailyCost = daysCostOfClicks + daysCostOfViews;
+                                let daysCostOfImpressions = parseInt(impressions) * 0.0018; // USD
+                                let currentDailyCost = daysCostOfClicks + daysCostOfViews + daysCostOfImpressions;
                                 console.log(views, clicks, currentDailyCost, adBudget);
                                 if (currentDailyCost < adBudget) { // if the ad is under the budget for the day, video is good
                                     resolve(true);
@@ -516,6 +521,7 @@ const incrementDailyBudgetRecord = async(id, type = "view", adBudget, startDate,
                                 }
                                 let clicks = 0; // if no record is found for clicks that means there has been no clicks for the day, multiply by 0
                                 let views = 0; // vice versa
+                                let impressions = 0;
                                 Object.keys(value).map(key => {
                                     if (key == formattedDate + "-c") {
                                         clicks = value[key];
@@ -523,11 +529,63 @@ const incrementDailyBudgetRecord = async(id, type = "view", adBudget, startDate,
                                     if (key == formattedDate + "-v") {
                                         views = value[key];
                                     }
+                                    if (key == formattedDate + "-i") {
+                                        impressions = value[key];
+                                    }
                                 })
                                 let daysCostOfViews = parseInt(views) * 0.03; // USD
                                 let daysCostOfClicks = parseInt(clicks) * 0.15; // USD
-                                let currentDailyCost = daysCostOfClicks + daysCostOfViews;
+                                let daysCostOfImpressions = parseInt(impressions) * 0.0018; // USD
+                                let currentDailyCost = daysCostOfClicks + daysCostOfViews + daysCostOfImpressions;
                                 console.log(views, clicks, currentDailyCost, adBudget);
+                                if (currentDailyCost < adBudget) { // if the ad is under the budget for the day, video is good
+                                    resolve(true);
+                                } else {
+                                    resolve(false); // user must request new playlist
+                                }
+                            });
+                        } else {
+                            try {
+                            dailyadlimitsclient.hmset(id, formattedDate + "-v", 0, formattedDate + "-c", 1);
+                                resolve(true);
+                            } catch (err) {
+                                reject(false);
+                            }
+                        }
+                    });
+                    return incView.then((result) => {
+                        return result;
+                    })
+                } else if (type == "impression") {
+                    let incView = new Promise((resolve, reject) => {
+                        let date = new Date();
+                        let formattedDate = (date.getMonth() + 1) + "/" + date.getDate() + "/" + date.getFullYear();
+                        if (contentExists) {
+                            dailyadlimitsclient.hincrby(id, formattedDate + "-i", 1);
+                            dailyadlimitsclient.hgetall(id, (err, value) => {
+                                if (err) {
+                                    resolve(false);
+                                }
+                                let clicks = 0; // if no record is found for clicks that means there has been no clicks for the day, multiply by 0
+                                let views = 0; // vice versa
+                                let impressions = 0;
+                                Object.keys(value).map(key => {
+                                    if (key == formattedDate + "-c") {
+                                        clicks = value[key];
+                                    }
+                                    if (key == formattedDate + "-v") {
+                                        views = value[key];
+                                    }
+                                    if (key == formattedDate + "-i") {
+                                        impressions = value[key];
+                                    }
+                                })
+                                console.log(value);
+                                let daysCostOfViews = parseInt(views) * 0.03; // USD
+                                let daysCostOfClicks = parseInt(clicks) * 0.15; // USD
+                                let daysCostOfImpressions = parseInt(impressions) * 0.0012; // USD
+                                let currentDailyCost = daysCostOfClicks + daysCostOfViews + daysCostOfImpressions;
+                                console.log(views, clicks, impressions, currentDailyCost, adBudget);
                                 if (currentDailyCost < adBudget) { // if the ad is under the budget for the day, video is good
                                     resolve(true);
                                 } else {
