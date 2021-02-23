@@ -4,6 +4,7 @@
 Worker for processing video upload to S3 server and database recording
 */
 
+const cluster = require('cluster');
 const ffmpeg = require('ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -20,6 +21,7 @@ const Video = require('../models/video');
 const redis = require('../redis');
 const redisclient = redis.redisclient;
 const servecloudfront = require('./servecloudfront.js');
+const { resolveLogging } = require('../scripts/logging.js');
 
 // file upload
 const aws = require('aws-sdk');
@@ -47,8 +49,8 @@ const createObj = (obj) => {
 }
 
 // connect mongoose
-mongoose.connect('mongodb://localhost:27017/minireel')
-    .then(() => console.log('MongoDB Connected(processvideo.js)'))
+mongoose.connect(s3Cred.mongo.address)
+    .then(() => resolveLogging() ? console.log('MongoDB Connected(processvideo.js)') : null)
     .catch(err => console.log(err));
 
 const db = mongoose.connection;
@@ -161,14 +163,17 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             maxBuffer: 200 * 1024
         };
 
-        const relative = "../../../../";
+        // const relative = "../../../../";
+        const relative = "../../../../../";
         const captureName = /([a-z].*)\/([a-z0-9].*)-/;
         const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
         const rawObjUrls = [];
         for (let i = 0; i < objUrls.length; i++) { // Go through all uri's and create references in array to all raw obj uri's
             rawObjUrls[i] = createObj(objUrls[i]);
         }
-        let command = "cd scripts/src/out/Release && packager.exe";
+        // This is the single area that we need to reference shaka packager's exe to build mpd's
+        // let command = "cd scripts/src/out/Release && packager.exe"; 
+        let command = "cd node_modules/shaka-packager-static/bin/win32/x64 && packager.exe";
         let args = "";
         for (obj of objUrls) {
             let detail = obj.detail;
@@ -181,6 +186,11 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             } else {
                 fileType = "text";
             }
+            // Relative is the directories relative to the packager.exe file. 
+            // Obj.path is the path of the files passed in the array
+            // File type is specified for packager to understand what it needs to do
+            // Detail is the added info to specify a file (audio, 1080, 720)
+            // in is input, output is output
             args += "in=" + relative + obj.path + ",stream=" + fileType + ",output=" + relative + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
             obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4";
         }
@@ -369,6 +379,7 @@ const profanityCheck = async (record, generatedUuid, advertisement = null) => {
     }
     return await recognition.startContentModeration(params, function(err, data) {
         if (err) {
+            console.log(err);
             return null;
         }
         if (data) {

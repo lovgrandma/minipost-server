@@ -31,6 +31,8 @@ const processimage = require('./processimage.js');
 const { badLabels } = require('./processprofanity.js');
 const { deleteOne } = require('./utility.js');
 const playlist = require('./playlist.js');
+const packager = require('shaka-packager-static');
+console.log(packager.path);
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 maintenance.queueMaintenance(videoQueue);
@@ -71,7 +73,6 @@ module.exports = function(io) {
         if (err) {
            return null // (err, err.stack) an error occurred
         } else {
-            console.log(data);           // successful response
             if (data.QueueUrls) {
                 for (let i = 0; i < data.QueueUrls.length; i++) {
                     if (data.QueueUrls[i].match(/(.*AmazonRekognition.*)/)) {

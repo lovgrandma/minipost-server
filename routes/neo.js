@@ -1098,7 +1098,6 @@ const incrementContentViewRead = async (id, user, type = "video", ad = false, ad
                                         } else {
                                             setVideoViewsArticleReadsNeo(id, value.views, "video");
                                         }
-                                        console.log("playlist good " + goodPlaylist);
                                         resolve({ 
                                             increment: true, 
                                             playlist: goodPlaylist
@@ -1109,7 +1108,6 @@ const incrementContentViewRead = async (id, user, type = "video", ad = false, ad
                                     return await articlereadsclient.hgetall(id, (err, value) => {
                                         console.log(value);
                                         setVideoViewsArticleReadsNeo(id, value.reads, "article");
-                                        console.log("playlist good " + goodPlaylist);
                                         resolve({ 
                                             increment: true, 
                                             playlist: goodPlaylist
@@ -1286,7 +1284,7 @@ const incrementLikeDislikeRedis = async (type, id, increment, like, user, cleanU
         if (type.normalize().toLocaleLowerCase() == "article") {
             viewsOrReads = "reads";
         }
-        console.log(type, id, increment, like, user, cleanUp, nodeExists, viewsOrReads);
+        // console.log(type, id, increment, like, user, cleanUp, nodeExists, viewsOrReads);
         if (nodeExists) {
             // Check if node exists in redis database
             let nodeExistsRedis = new Promise((resolve, reject) => {

@@ -1,5 +1,6 @@
 'use strict';
 
+const cluster = require('cluster');
 const express = require('express');
 const fs = require('fs');
 const bodyParser = require('body-parser');
@@ -21,6 +22,9 @@ const server = require('http').createServer(app);
 const io = require('socket.io')(server);
 const socketRoutes = require('./socket')(io);
 const users = require('./routes/m')(io);
+const { resolveLogging } = require('./scripts/logging.js');
+
+const s3Cred = require('./routes/api/s3credentials.js');
 
 // parse incoming requests as json and make it accessible from req body property.
 app.use(bodyParser.json({
@@ -38,8 +42,8 @@ app.use(cookieParser('small car big wheels'));
 app.use(morgan('combined'))
 
 // connect mongoose
-mongoose.connect('mongodb://localhost:27017/minireel')
-    .then(() => console.log('MongoDB Connected'))
+mongoose.connect(s3Cred.mongo.address)
+    .then(() => resolveLogging() ? console.log('MongoDB Connected') : null)
     .catch(err => console.log(err));
 
 const db = mongoose.connection;
@@ -49,7 +53,7 @@ db.on('error', console.error.bind(console, 'connection error:'));
 // mongo store
 const store = new MongoDBStore(
     {
-        uri: 'mongodb://localhost:27017/minireel',
+        uri: s3Cred.mongo.address,
         databaseName: 'minireel',
         collection: 'sessions'
     }
@@ -114,6 +118,6 @@ app.use(function(err, req, res, next) {
 
 const port = process.env.PORT || 5000;
 server.setTimeout(10*60*1000);
-server.listen(port, () => console.log(`Minipost server started on port ${port}`));
+server.listen(port, () => resolveLogging() ? console.log(`Minipost server started on port ${port}`) : null);
 
 module.exports = {io};
