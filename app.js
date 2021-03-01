@@ -116,7 +116,7 @@ app.use(function(err, req, res, next) {
     console.log(err);
 })
 
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || s3Cred.app.port;
 server.setTimeout(10*60*1000);
 server.listen(port, () => resolveLogging() ? console.log(`Minipost server started on port ${port}`) : null);
 

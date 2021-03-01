@@ -348,6 +348,7 @@ exports = module.exports = function(io){
         })
         
         socket.on('sendWatch', (data) => {
+            console.log(data);
             io.to(data.room).emit('receiveWatch', data);
         })
         

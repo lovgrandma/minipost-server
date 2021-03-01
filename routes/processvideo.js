@@ -60,7 +60,7 @@ db.on('error', console.error.bind(console, 'connection error:'));
 // mongo store
 const store = new MongoDBStore(
     {
-        uri: 'mongodb://localhost:27017/minireel',
+        uri: s3Cred.mongo.address,
         databaseName: 'minireel',
         collection: 'sessions'
     }
