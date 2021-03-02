@@ -2047,6 +2047,11 @@ module.exports = function(io) {
         return buildPlaylist(req, res, next);
     })
     
+    router.get('/hello', (req, res, next) => {
+        console.log("hello");
+        return res.json("hello");
+    })
+    
     // GET a users profile
 
     return router;
