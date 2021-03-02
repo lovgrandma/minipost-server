@@ -3,7 +3,7 @@ config/config.js
 /uploads
 /routes/api/s3credentials.js
 /temp
-/routes/api/keys/*
+/routes/api/keys/*.pem
 /scripts/depot_tools/
 /scripts/src/
 /scripts/.gclient
