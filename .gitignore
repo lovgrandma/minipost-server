@@ -8,3 +8,4 @@ config/config.js
 /scripts/src/
 /scripts/.gclient
 /scripts/.gclient_entries
+/deploy
