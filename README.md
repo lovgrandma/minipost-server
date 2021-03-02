@@ -1,3 +1,5 @@
+Backend Service for minipost LLC
+
 SHAKA PACKAGER
 
 Please install depot tools in scripts folder first, requires python. Then install shaka packager in scripts folder without shaka packager folder. This is required for creating mpd files. Again, will require manual linux installation in scripts folder. May not work if you create shaka_packager folder. Skip and simply run 
