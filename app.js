@@ -19,10 +19,11 @@ const redis = require('./redis');
 const app = express();
 const privateKey = fs.readFileSync('key.pem');
 const certificate = fs.readFileSync('cert.pem');
-const server = require('http').createServer({
+const options = {
     key: privateKey,
     cert: certificate
-}, app);
+};
+const server = require('https').createServer(options, app); // Set to https to force https connections to api
 const io = require('socket.io')(server);
 const socketRoutes = require('./socket')(io);
 const users = require('./routes/m')(io);
