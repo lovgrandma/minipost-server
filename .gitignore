@@ -9,3 +9,5 @@ config/config.js
 /scripts/.gclient
 /scripts/.gclient_entries
 /deploy
+/key.pem
+/cert.pem
