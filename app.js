@@ -59,7 +59,7 @@ db.on('error', console.error.bind(console, 'connection error:'));
 const store = new MongoDBStore(
     {
         uri: s3Cred.mongo.address,
-        databaseName: 'minireel',
+        databaseName: 'minipost',
         collection: 'sessions'
     }
 );
