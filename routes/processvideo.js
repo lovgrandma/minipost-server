@@ -67,7 +67,6 @@ db.on('error', console.error.bind(console, 'connection error:'));
 const store = new MongoDBStore(
     {
         uri: s3Cred.mongo.addressAuth,
-        databaseName: 'minireel',
         collection: 'sessions'
     }
 );
