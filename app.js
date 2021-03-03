@@ -46,8 +46,13 @@ app.use(cookieParser('small car big wheels'));
 
 app.use(morgan('combined'))
 
+const mongoOptions = {
+    auth: {authdb: s3Cred.mongo.authDb },
+    user: s3Cred.mongo.u,
+    pass: s3Cred.mongo.p
+};
 // connect mongoose
-mongoose.connect(s3Cred.mongo.authAddress, {auth:{authdb: s3Cred.mongo.authDb }})
+mongoose.connect(s3Cred.mongo.address, mongoOptions)
     .then(() => resolveLogging() ? console.log('MongoDB Connected') : null)
     .catch(err => console.log(err));
 
