@@ -66,9 +66,6 @@ const store = new MongoDBStore(
         uri: s3Cred.mongo.addressAuth,
         databaseName: 'minipost',
         collection: 'sessions'
-    },
-    function(error) {
-        console.log(error);
     }
 );
 
