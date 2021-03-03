@@ -49,7 +49,7 @@ const createObj = (obj) => {
 }
 
 // connect mongoose
-mongoose.connect(s3Cred.mongo.address)
+mongoose.connect(s3Cred.mongo.authAddress, {auth:{authdb: s3Cred.mongo.authDb }})
     .then(() => resolveLogging() ? console.log('MongoDB Connected(processvideo.js)') : null)
     .catch(err => console.log(err));
 
