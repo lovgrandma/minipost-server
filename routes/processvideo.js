@@ -22,6 +22,8 @@ const redis = require('../redis');
 const redisclient = redis.redisclient;
 const servecloudfront = require('./servecloudfront.js');
 const { resolveLogging } = require('../scripts/logging.js');
+const packager = require('shaka-packager-static');
+console.log(packager.path);
 
 // file upload
 const aws = require('aws-sdk');
@@ -179,7 +181,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         }
         // This is the single area that we need to reference shaka packager's exe to build mpd's
         // let command = "cd scripts/src/out/Release && packager.exe"; 
-        let command = "cd node_modules/shaka-packager-static/bin/win32/x64 && packager.exe";
+        let command = "cd node_modules/shaka-packager-static/bin/win32/x64 && ./packager.exe";
         let args = "";
         for (obj of objUrls) {
             let detail = obj.detail;
