@@ -37,7 +37,7 @@ const s3Cred = require('./routes/api/s3credentials.js');
 const whitelist = [ 'https://www.minipost.app', 'http://minipost.app', 'www.minipost.app', 'minipost.app'];
 app.use(cors({
   origin : function(origin, callback) {
-      if (whitelist.indexof(origin) !== -1 || !origin) {
+      if (whitelist.indexOf(origin) !== -1 || !origin) {
           callback(null, true);
       }    else {
           callback(new Error("Not allowed"));
