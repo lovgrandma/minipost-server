@@ -89,6 +89,7 @@ const store = new MongoDBStore(
 // use sessions for tracking logins
 app.use(session({
     secret: 'small car big wheels',
+    secure: true,
     cookie: {
         // reading session ID cookie is forbidden by default. Change this with httpOnly setting below (set to false).
         // Setting this to true will defend against XSS attacks. Keep true or dont define at all.
