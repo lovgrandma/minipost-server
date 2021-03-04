@@ -100,14 +100,14 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                                 return convertVideos(i, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                             } else {
                                 console.log(err);
-                                deleteJob(false, job, mpd, room);
+                                deleteJob(false, job, null, room);
                                 deleteVideoArray(objUrls, originalVideo, room, 15000);
                                 job.progress(room + ";something went wrong");
                                 return err;
                             }
                         });
                     } else {
-                        deleteJob(false, job, mpd, room);
+                        deleteJob(false, job, null, room);
                         deleteVideoArray(objUrls, originalVideo, room, 15000);
                         console.log("Audio codec not supported");
                         job.progress(room + "audio codec not supported");
@@ -136,7 +136,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
                             return convertVideos(i+1, originalVideo, objUrls, generatedUuid, false, room, body, socket, job);
                         } else {
                             console.log(err);
-                            deleteJob(false, job, mpd, room);
+                            deleteJob(false, job, null, room);
                             deleteVideoArray(objUrls, originalVideo, room, 15000);
                             job.progress(room + ";video conversion error");
                             return err;
@@ -146,7 +146,7 @@ const convertVideos = async function(i, originalVideo, objUrls, generatedUuid, e
             }
         } catch (e) {
             console.log("Error msg: " + e.msg);
-            deleteJob(false, job, mpd, room);
+            deleteJob(false, job, null, room);
             deleteVideoArray(objUrls, originalVideo, room, 15000);
             job.progress(room + ";conversion error");
             return e;
@@ -200,15 +200,17 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             args += "in=" + relative + obj.path + ",stream=" + fileType + ",output=" + relative + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
             obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4";
         }
-        const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd";
-        args += "--mpd_output " + relative + expectedMpdPath;
+        const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd"; // make expected mpd file string
+        args += "--mpd_output " + relative + expectedMpdPath; // add expected relative mpd output path
         // command + " " + args
         // Log above variables to see full child process command to be run
         let data = cp.exec(command + " " + args, {maxBuffer: 1024 * 8000}, function(err, stdout, stderr) { // 8000kb max buffer
             if (err) {
+                console.log(expectedMpdPath);
+                console.log(err);
                 console.log("Something went wrong, mpd was not created");
                 job.progress(room + ";something went wrong");
-                deleteJob(false, job, mpd, room);
+                deleteJob(false, job, null, room);
                 deleteVideoArray(objUrls, originalVideo, room, 15000);
             } else {
                 try {
@@ -223,7 +225,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
                         console.log("Something went wrong, mpd was not created");
                         job.progress(room + ";something went wrong");
                         delArr.push(...objUrls, ...rawObjUrls);
-                        deleteJob(false, job, mpd, room);
+                        deleteJob(false, job, null, room);
                         deleteVideoArray(delArray, originalVideo, room, 15000);
                     }
                 } catch (err) {
@@ -231,7 +233,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
                     console.log("Something went wrong, mpd was not created");
                     job.progress(room + ";conversion error");
                     delArr.push(...objUrls, ...rawObjUrls);
-                    deleteJob(false, job, mpd, room);
+                    deleteJob(false, job, null, room);
                     deleteVideoArray(delArray, originalVideo, room, 15000);
                 }
             }
@@ -241,7 +243,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         console.log("Something went wrong, mpd was not created");
         job.progress(room + ";conversion error");
         delArr.push(...objUrls, ...rawObjUrls);
-        deleteJob(false, job, mpd, room);
+        deleteJob(false, job, null, room);
         deleteVideoArray(delArray, originalVideo, room, 15000);
     }
 }
@@ -255,7 +257,7 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
     let s3Objects = [];
     if (objUrls.length == 0) {
         job.progress(room + ";something went wrong");
-        deleteJob(false, job, mpd, room);
+        deleteJob(false, job, null, room);
         deleteVideoArray(delArray, originalVideo, room, 15000);
     }
     let delArr = [];
@@ -282,14 +284,14 @@ const uploadAmazonObjects = async function(objUrls, originalVideo, room, body, g
                 console.log("Something went wrong, not all objects uploaded to s3");
                 job.progress(room + ";something went wrong");
                 delArr.push(...objUrls, ...rawObjUrls);
-                deleteJob(false, job, mpd, room);
+                deleteJob(false, job, null, room);
                 deleteVideoArray(delArray, originalVideo, room, 15000);
             }
         } catch (err) {
             console.log("Something went wrong, not all objects uploaded to s3");
             job.progress(room + ";something went wrong");
             delArr.push(...objUrls, ...rawObjUrls);
-            deleteJob(false, job, mpd, room);
+            deleteJob(false, job, null, room);
             deleteVideoArray(delArray, originalVideo, room, 15000);
         }
     }
@@ -355,7 +357,7 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                             return neo.updateChannelNotifications(userUuid, generatedUuid, "video");
                         })
                         .then((data) => {
-                            deleteJob(true, job, mpd, room); // Success
+                            deleteJob(true, job, null, room); // Success
                             deleteVideoArray(delArr, originalVideo, room, 10000);
                         });
                 }
