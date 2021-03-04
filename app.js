@@ -17,6 +17,7 @@ const morgan = require('morgan');
 const assert = require('assert');
 const redis = require('./redis');
 const app = express();
+const cors = require('cors');
 const privateKey = fs.readFileSync('minipost-server-key.key');
 const certificate = fs.readFileSync('minipost-server-certificate.crt');
 const bundle = fs.readFileSync('minipost-server-bundle.ca-bundle');
@@ -33,6 +34,12 @@ const { resolveLogging } = require('./scripts/logging.js');
 
 const s3Cred = require('./routes/api/s3credentials.js');
 
+app.use(cors({
+  origin : 'https://www.minipost.app' // Front end url to allow
+  credentials: true, // <= Accept credentials (cookies) sent by the client
+});
+        
+        
 // parse incoming requests as json and make it accessible from req body property.
 app.use(bodyParser.json({
     type: function(req) {
@@ -87,9 +94,9 @@ app.use(session({
 
 // Add headers
 app.use(function (req, res, next) {
-    res.setHeader('Access-Control-Allow-Origin', '*'); // Website you wish to allow to connect
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin); // Website you wish to allow to connect. Use * for second arg if err
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE'); // Request methods you wish to allow
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, content-type, Accept'); // Request headers you wish to allow
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept'); // Request headers you wish to allow
     res.setHeader('Access-Control-Allow-Credentials', true); // Set to true if you need the website to include cookies in the requests sent to the API
     next();
 });
