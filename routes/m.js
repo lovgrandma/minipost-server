@@ -608,7 +608,7 @@ module.exports = function(io) {
                     }
                     console.log("Assigning cookie login: " + user.username);
                     res.cookie('loggedIn', user.username, [options]);
-                    return res.json({querystatus: "loggedin"});
+                    return res.json({querystatus: "loggedin", username: user.username });
                 }
             });
         } else {
