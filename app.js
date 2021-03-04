@@ -35,8 +35,8 @@ const { resolveLogging } = require('./scripts/logging.js');
 const s3Cred = require('./routes/api/s3credentials.js');
 
 app.use(cors({
-  origin : 'https://www.minipost.app' // Front end url to allow
-  credentials: true, // <= Accept credentials (cookies) sent by the client
+  origin : 'https://www.minipost.app', // Front end url to allow
+  credentials: true // <= Accept credentials (cookies) sent by the client
 });
         
         
