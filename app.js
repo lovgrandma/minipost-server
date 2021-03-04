@@ -34,10 +34,18 @@ const { resolveLogging } = require('./scripts/logging.js');
 
 const s3Cred = require('./routes/api/s3credentials.js');
 
+const whitelist = [ 'https://www.minipost.app', 'http://minipost.app', 'www.minipost.app', 'minipost.app'];
 app.use(cors({
-  origin : 'https://www.minipost.app', // Front end url to allow
+  origin : function(origin, callback) {
+      if (whitelist.indexof(origin) !== -1 || !origin) {
+          callback(null, true);
+      }    else {
+          callback(new Error("Not allowed"));
+      } 
+  }, // Front end url to allow
+  optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
   credentials: true // <= Accept credentials (cookies) sent by the client
-});
+}));
         
         
 // parse incoming requests as json and make it accessible from req body property.
