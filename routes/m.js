@@ -603,9 +603,9 @@ module.exports = function(io) {
                     req.session.username = user.username;
                     let options = {
                         maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
-                        signed: true,
-                        path: "/"
+                        signed: true
                     }
+                    console.log("Assigning cookie login: " + user.username);
                     res.cookie('loggedIn', user.username, [options]);
                     return res.json({querystatus: "loggedin"});
                 }
