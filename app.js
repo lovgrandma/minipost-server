@@ -17,9 +17,9 @@ const morgan = require('morgan');
 const assert = require('assert');
 const redis = require('./redis');
 const app = express();
-const privateKey = fs.readFileSync('private.key');
-const certificate = fs.readFileSync('certificate.crt');
-const bundle = fs.readFileSync('bundle.ca-bundle');
+const privateKey = fs.readFileSync('minipost-server-key.key');
+const certificate = fs.readFileSync('minipost-server-certificate.crt');
+const bundle = fs.readFileSync('minipost-server-bundle.ca-bundle');
 const options = {
     key: privateKey,
     cert: certificate,
