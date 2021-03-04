@@ -482,7 +482,10 @@ const deleteJob = async (complete, job, mpd, room) => {
         job.moveToCompleted();
     } else {
         job.progress(room + ";video process failed;null");
-        job.moveToFailed();
+        let error = {
+            message: 'video process failed'
+        };
+        job.moveToFailed(error, true);
     }
     setTimeout(() => {
         deleteRedisRecord(job, room);
