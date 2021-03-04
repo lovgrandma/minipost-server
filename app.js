@@ -19,9 +19,11 @@ const redis = require('./redis');
 const app = express();
 const privateKey = fs.readFileSync('key.pem');
 const certificate = fs.readFileSync('cert.pem');
+const bundle = fs.readFileSync('www_minipost_app.ca-bundle');
 const options = {
     key: privateKey,
-    cert: certificate
+    cert: certificate,
+    ca: bundle
 };
 const server = require('https').createServer(options, app); // Set to https to force https connections to api
 const io = require('socket.io')(server);
