@@ -172,7 +172,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         };
 
         // const relative = "../../../../";
-        const relative = "../../../../../";
+        // const relative = "../../../../../";
         const captureName = /([a-z].*)\/([a-z0-9].*)-/;
         const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
         const rawObjUrls = [];
@@ -181,7 +181,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         }
         // This is the single area that we need to reference shaka packager's exe to build mpd's
         // let command = "cd scripts/src/out/Release && packager.exe"; 
-        let command = "cd node_modules/shaka-packager-static/bin/linux/x64 && ./packager";
+        let command = "./packager";
         let args = "";
         for (obj of objUrls) {
             let detail = obj.detail;
@@ -199,11 +199,11 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             // File type is specified for packager to understand what it needs to do
             // Detail is the added info to specify a file (audio, 1080, 720)
             // in is input, output is output
-            args += "in=" + relative + obj.path + ",stream=" + fileType + ",output=" + relative + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
+            args += "in=" + obj.path + ",stream=" + fileType + ",output=" + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
             obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4";
         }
         const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd"; // make expected mpd file string
-        args += "--mpd_output " + relative + expectedMpdPath; // add expected relative mpd output path
+        args += "--mpd_output " + expectedMpdPath; // add expected relative mpd output path
         // command + " " + args
         // Log above variables to see full child process command to be run
         let data = cp.exec(command + " " + args, {maxBuffer: 1024 * 8000}, function(err, stdout, stderr) { // 8000kb max buffer
