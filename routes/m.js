@@ -31,7 +31,6 @@ const processimage = require('./processimage.js');
 const { badLabels } = require('./processprofanity.js');
 const { deleteOne } = require('./utility.js');
 const playlist = require('./playlist.js');
-const packager = require('shaka-packager-static');
 
 const videoQueue = new Bull('video transcoding', "redis://" + redisApp.redishost + ":" + redisApp.redisport);
 maintenance.queueMaintenance(videoQueue);
