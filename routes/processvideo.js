@@ -51,7 +51,9 @@ const createObj = (obj) => {
 const mongoOptions = {
     auth: {authdb: s3Cred.mongo.authDb },
     user: s3Cred.mongo.u,
-    pass: s3Cred.mongo.p
+    pass: s3Cred.mongo.p,
+    useMongoClient: true,
+    autoIndex: false
 };
 
 // connect mongoose
