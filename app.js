@@ -5,7 +5,6 @@ const express = require('express');
 const fs = require('fs');
 const bodyParser = require('body-parser');
 const logger = require("morgan");
-const pug = require('pug');
 const mongoose = require('mongoose');
 const session = require('express-session');
 const MongoDBStore = require('connect-mongodb-session')(session);
