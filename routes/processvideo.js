@@ -22,8 +22,6 @@ const redis = require('../redis');
 const redisclient = redis.redisclient;
 const servecloudfront = require('./servecloudfront.js');
 const { resolveLogging } = require('../scripts/logging.js');
-const packager = require('shaka-packager-static');
-console.log(packager.path);
 
 // file upload
 const aws = require('aws-sdk');
