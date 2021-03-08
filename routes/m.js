@@ -1,7 +1,7 @@
 /** Main Routes file m.js
 @version 0.3
 @author Jesse Thompson
-Handles calls to mongodb, user authentication, chat functionality, video upload and records etc
+Handles calls to mongodb, user authentication, chat functionality, video upload and records etc 
 */
 const util = require('util');
 const fs = require('fs');
