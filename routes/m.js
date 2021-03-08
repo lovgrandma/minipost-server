@@ -822,6 +822,7 @@ module.exports = function(io) {
                     if (err) {
                         console.log(err);
                     };
+                    console.log(result);
                     res.json(result);
                 })
             }
