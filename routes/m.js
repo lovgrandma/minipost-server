@@ -823,7 +823,7 @@ module.exports = function(io) {
                         console.log(err);
                     };
                     res.json(result);
-                }).lean();
+                })
             }
 
             User.findOne({username: req.body.thetitleofsomeonewewanttobecloseto}, {friends: 1}, function(err, result) {
