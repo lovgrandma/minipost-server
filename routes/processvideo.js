@@ -181,7 +181,7 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
         }
         // This is the single area that we need to reference shaka packager's exe to build mpd's
         // let command = "cd scripts/src/out/Release && packager.exe"; 
-        let command = "./packager";
+        let command = "packager";
         let args = "";
         for (obj of objUrls) {
             let detail = obj.detail;
