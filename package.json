@@ -28,7 +28,7 @@
     "ffmpeg": "0.0.4",
     "fs": "0.0.1-security",
     "json-stringify-safe": "^5.0.1",
-    "mongoose": "^5.11.19",
+    "mongoose": "^4.13.20",
     "morgan": "^1.10.0",
     "multer": "^1.4.2",
     "neo4j-driver": "^4.2.3",
