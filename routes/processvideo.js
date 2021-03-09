@@ -51,9 +51,7 @@ const createObj = (obj) => {
 const mongoOptions = {
     auth: {authdb: s3Cred.mongo.authDb },
     user: s3Cred.mongo.u,
-    pass: s3Cred.mongo.p,
-    useMongoClient: true,
-    autoIndex: false
+    pass: s3Cred.mongo.p
 };
 
 // connect mongoose
@@ -359,13 +357,15 @@ const makeVideoRecord = async function(s3Objects, body, room, generatedUuid, soc
                             return neo.updateChannelNotifications(userUuid, generatedUuid, "video");
                         })
                         .then((data) => {
-                            deleteJob(true, job, null, room); // Success
+                            deleteJob(true, job, mpd, room); // Success
                             deleteVideoArray(delArr, originalVideo, room, 10000);
                         });
                 }
                 break;
             }
         }
+    } else {
+        
     }
 }
 

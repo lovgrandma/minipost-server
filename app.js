@@ -65,9 +65,7 @@ app.use(morgan('combined'))
 const mongoOptions = {
     auth: {authdb: s3Cred.mongo.authDb },
     user: s3Cred.mongo.u,
-    pass: s3Cred.mongo.p,
-    useMongoClient: true,
-    autoIndex: false
+    pass: s3Cred.mongo.p
 };
 // connect mongoose
 mongoose.connect(s3Cred.mongo.address, mongoOptions)
