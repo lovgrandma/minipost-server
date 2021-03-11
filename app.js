@@ -117,7 +117,9 @@ app.use(session({
 // Add headers
 app.use(function (req, res, next) {
     if (!process.env.dev) { // If production
-        res.setHeader('Access-Control-Allow-Origin', req.headers.origin); // Website you wish to allow to connect. Use * for second arg if err
+        if (whitelist.includes(req.headers.origin)) {
+            res.setHeader('Access-Control-Allow-Origin', req.headers.origin); // Website you wish to allow to connect. Use * for second arg if err
+        }
     } else {
         res.setHeader('Access-Control-Allow-Origin', '*'); // Website you wish to allow to connect. Use * for second arg if err
     }
