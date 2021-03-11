@@ -25,7 +25,13 @@ const options = {
     cert: certificate,
     ca: bundle
 };
-const server = require('https').createServer(options, app); // Set to https to force https connections to api
+let server;
+console.log(process.env.dev);
+if (process.env.dev) {
+    server = require('http').createServer(app);
+} else {
+    server = require('https').createServer(options, app); // Set to https to force https connections to api
+}
 const io = require('socket.io')(server);
 const socketRoutes = require('./socket')(io);
 const users = require('./routes/m')(io);
@@ -34,17 +40,25 @@ const { resolveLogging } = require('./scripts/logging.js');
 const s3Cred = require('./routes/api/s3credentials.js');
 
 const whitelist = [ 'https://www.minipost.app', 'http://minipost.app', 'www.minipost.app', 'minipost.app'];
-app.use(cors({
-  origin : function(origin, callback) {
-      if (whitelist.indexOf(origin) !== -1 || !origin) {
-          callback(null, true);
-      }    else {
-          callback(new Error("Not allowed"));
-      } 
-  }, // Front end url to allow
-  optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
-  credentials: true // <= Accept credentials (cookies) sent by the client
-}));
+if (!process.env.dev) { 
+    app.use(cors({
+        origin : function(origin, callback) {
+            if (whitelist.indexOf(origin) !== -1 || !origin) {
+                callback(null, true);
+            }    else {
+                callback(new Error("Not allowed"));
+            } 
+        }, // Front end url to allow
+        optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
+        credentials: true // <= Accept credentials (cookies) sent by the client
+    }));
+} else {
+    app.use(cors({
+        origin : '*', // Front end url to allow
+        optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
+        credentials: true // <= Accept credentials (cookies) sent by the client
+    }));
+}
         
         
 // parse incoming requests as json and make it accessible from req body property.
@@ -102,7 +116,11 @@ app.use(session({
 
 // Add headers
 app.use(function (req, res, next) {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin); // Website you wish to allow to connect. Use * for second arg if err
+    if (!process.env.dev) { // If production
+        res.setHeader('Access-Control-Allow-Origin', req.headers.origin); // Website you wish to allow to connect. Use * for second arg if err
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', '*'); // Website you wish to allow to connect. Use * for second arg if err
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE'); // Request methods you wish to allow
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept'); // Request headers you wish to allow
     res.setHeader('Access-Control-Allow-Credentials', true); // Set to true if you need the website to include cookies in the requests sent to the API

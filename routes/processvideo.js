@@ -67,7 +67,7 @@ db.on('error', console.error.bind(console, 'connection error:'));
 const store = new MongoDBStore(
     {
         uri: s3Cred.mongo.addressAuth,
-        databaseName: 'minireel',
+        databaseName: 'minipost',
         collection: 'sessions'
     }
 );
@@ -169,8 +169,6 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             maxBuffer: 200 * 1024
         };
 
-        // const relative = "../../../../";
-        // const relative = "../../../../../";
         const captureName = /([a-z].*)\/([a-z0-9].*)-/;
         const matchPathExcludePeriod = /([a-z].*)([a-z0-9]*)[.]([a-z].*)/;
         const rawObjUrls = [];
@@ -197,12 +195,12 @@ const makeMpd = async function(objUrls, originalVideo, room, body, generatedUuid
             // File type is specified for packager to understand what it needs to do
             // Detail is the added info to specify a file (audio, 1080, 720)
             // in is input, output is output
-            args += "in=" + obj.path + ",stream=" + fileType + ",output=" + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " ";
-            obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4";
+            args += "in=" + obj.path + ",stream=" + fileType + ",output=" + obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4" + " "; 
+            obj.path = obj.path.match(/([\/a-z0-9]*)-([a-z0-9]*)-([a-z]*)/)[1] + "-" + detail + ".mp4"; // Change the path to the object to reference for aws s3 transfer
         }
         const expectedMpdPath = objUrls[0].path.match(/([\/a-z0-9]*)-([a-z0-9]*)/)[1] + "-mpd.mpd"; // make expected mpd file string
-        args += "--mpd_output " + expectedMpdPath; // add expected relative mpd output path
-        // command + " " + args
+        args += "--mpd_output " + expectedMpdPath; // add expected relative mpd output path. Relative means where ever the mpd is existing these files must also be existing in that folder. E.g if the mpd is in a folder, the files must be relative to that folder. Ideally just put them in the same folder. 
+        // console.log(command + " " + args);
         // Log above variables to see full child process command to be run
         let data = cp.exec(command + " " + args, {maxBuffer: 1024 * 8000}, function(err, stdout, stderr) { // 8000kb max buffer
             if (err) {
