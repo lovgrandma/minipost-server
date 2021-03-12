@@ -43,7 +43,6 @@ const whitelist = [ 'https://www.minipost.app', 'https://minipost.app', 'www.min
 if (!process.env.dev) { 
     app.use(cors({
         origin : function(origin, callback) {
-            console.log(origin);
             if (whitelist.indexOf(origin) !== -1 || !origin) {
                 callback(null, true);
             }    else {
