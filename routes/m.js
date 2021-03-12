@@ -1878,9 +1878,7 @@ module.exports = function(io) {
     
     const buildPlaylist = async(req, res, next) => {
         // either property can be null as users not logged in can still get a playlist. Do not allow for now as to reduce calls to backend from non monetized users
-        if (req.body.hasOwnProperty('user') && req.body.hasOwnProperty('append')) { 
-            return res.json(await playlist.buildPlaylist(req.body.user, req.body.append));
-        }
+        return res.json(await playlist.buildPlaylist(req.body.user, req.body.append));
     }
 
     // LOGIN USING CREDENTIALS
