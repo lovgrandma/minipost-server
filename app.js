@@ -39,10 +39,11 @@ const { resolveLogging } = require('./scripts/logging.js');
 
 const s3Cred = require('./routes/api/s3credentials.js');
 
-const whitelist = [ 'https://www.minipost.app', 'http://minipost.app', 'www.minipost.app', 'minipost.app'];
+const whitelist = [ 'https://www.minipost.app', 'https://minipost.app', 'www.minipost.app', 'minipost.app'];
 if (!process.env.dev) { 
     app.use(cors({
         origin : function(origin, callback) {
+            console.log(origin);
             if (whitelist.indexOf(origin) !== -1 || !origin) {
                 callback(null, true);
             }    else {
